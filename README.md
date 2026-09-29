@@ -22,12 +22,15 @@ especially noisy on devices that restore Wi-Fi after every wake from sleep
   left of the clock and battery: full waves = connected, half = Wi-Fi on but
   not connected, empty = off. **Tap it to toggle Wi-Fi** (broadcasts the same
   `ToggleWifi` event as the gesture action).
-- **Non-blocking Wi-Fi connect** (Kobo & other wpa_supplicant devices, and
-  Kindle). Stock KOReader connects synchronously in the UI thread, freezing
-  the device for the duration (hardware bring-up, scan, association, DHCP on
-  Kobo; the scan wait on Kindle). The bundled engine moves the blocking steps
-  into subprocesses and 250 ms polls, so you can keep reading while Wi-Fi
-  connects. No-op on other platforms.
+- **Non-blocking Wi-Fi connect** (Kobo & other wpa_supplicant devices).
+  Stock KOReader connects synchronously in the UI thread, freezing the device
+  for the duration (hardware bring-up, scan, association, DHCP). The bundled
+  engine runs the slow steps in subprocesses and 250 ms polls, so you can keep
+  reading while Wi-Fi connects — from the menu toggle, from actions that need
+  the network, on wake from sleep, and when picking a network from the list.
+  It also hands every network saved in KOReader to wpa_supplicant, so they
+  reconnect on their own just like networks joined in the Kobo OS. No-op on
+  other platforms.
 
 All behaviors can be switched off individually under
 **Menu → Network → Wi-Fi status icon**.
@@ -46,7 +49,7 @@ All behaviors can be switched off individually under
 
 `git clone` this repo (or **Code → Download ZIP** and unzip, then strip the
 `-main` suffix so the folder ends in `.koplugin`). Only `main.lua`,
-`nbwifi.lua` and `_meta.lua` are needed at runtime; copy the folder into
+`wificonnect.lua` and `_meta.lua` are needed at runtime; copy the folder into
 `koreader/plugins/`.
 </details>
 
@@ -62,6 +65,14 @@ plugin's dual FileManager/ReaderUI instantiation):
   the menu footer's device-info group and refreshes its state from
   `NetworkMgr:isConnected()` / `isWifiOn()` on every menu update.
 
+The connect engine (`wificonnect.lua`) replaces `NetworkMgr:turnOnWifi`,
+`reconnectOrShowNetworkMenu` and `restoreWifiAsync`, plus the network list's
+per-network connect. Once wpa_supplicant is up, it adds every KOReader-saved
+network it doesn't already know (in memory only; the Kobo OS's config file is
+never touched) and lets wpa_supplicant pick one. It shows no popups itself; it
+reports `connecting` / `connected` / `failed`, and `main.lua` turns that into
+the corner icon.
+
 ### Caveat
 
 Popup suppression matches KOReader's **source strings**. If a KOReader
@@ -71,22 +82,25 @@ else keeps working.
 
 ## Tests
 
-A self-contained harness stubs the KOReader modules and exercises the real
-plugin — popup filtering, icon injection, state mapping, tap-to-toggle, and
-settings. Run it from the repo root with LuaJIT (or any Lua 5.1):
+Three self-contained suites, run from the repo root with LuaJIT:
 
 ```sh
-luajit test/test_main.lua main.lua
+luajit test/test_main.lua main.lua   # plugin: popup filtering, icons, status presenter, settings
+luajit test/test_wificonnect.lua     # engine: pure network hand-off logic
+luajit test/test_engine.lua          # engine: simulated connect flows (fake KOReader + wpa_supplicant)
 ```
+
+The engine simulation checks flow and bookkeeping only; timing and real
+hardware behavior still need testing on a device.
 
 ## Relation to koreader-nonblocking-wifi
 
-The non-blocking connect engine is the bundled version of the
+The connect engine grew out of the
 [koreader-nonblocking-wifi](https://github.com/asxelot/koreader-nonblocking-wifi)
-user patch. If you have both installed, the user patch takes precedence and
-the plugin's copy backs off automatically (they coordinate through
-`NetworkMgr._nbwifi_installed`), so nothing breaks — but you only need one.
-Field-tested on Kobo Libra Colour (MTK) and a lipc Kindle.
+user patch and keeps its subprocess machinery, but connects differently (it
+lets wpa_supplicant choose among KOReader's saved networks). If you have the
+user patch installed too, it takes precedence and this plugin's engine backs
+off (they coordinate through `NetworkMgr._nbwifi_installed`). You only need one.
 
 ## License
 

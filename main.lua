@@ -24,13 +24,17 @@ local logger = require("logger")
 local _ = require("gettext")
 local Screen = Device.screen
 
--- Bundled non-blocking Wi-Fi connect engine (no-op on unsupported platforms, or when
+-- Non-blocking Wi-Fi connect engine (no-op on non-wpa_supplicant platforms, or when
 -- the standalone koreader-nonblocking-wifi user patch is already installed).
-local nbwifi = require("nbwifi")
+local wificonnect = require("wificonnect")
+wificonnect.install()
 
--- How long the corner icon stays on screen (matches the timeout of the
+-- How long the corner icon shows a result (matches the timeout of the
 -- popups it replaces).
 local ICON_TIMEOUT_S = 3
+-- Safety net: a "connecting" icon stays up until the attempt reports back, but never
+-- longer than this (the engine's worst case is about 75 s).
+local CONNECTING_MAX_S = 90
 -- Icon size, in unscaled pixels.
 local ICON_SIZE = 24
 -- Distance from the screen corner, in unscaled pixels.
@@ -49,24 +53,25 @@ local function msgToPattern(msg)
     return "^" .. pat .. "$"
 end
 
--- The popups we intercept, mapped to the icon (if any) shown in their stead.
+-- The popups we intercept, mapped to the status (if any) shown in their stead.
 -- These must be the exact source strings used by NetworkMgr/NetworkListener/
 -- NetworkSetting, so that gettext resolves them to the same translations.
 local INTERCEPTED_MESSAGES = {
-    { msg = _("Connecting to network %1…"), icon = ICON_CONNECTING }, -- NetworkMgr (Kindle)
-    { msg = _("Connected to network %1"), icon = ICON_CONNECTED }, -- NetworkMgr, NetworkSetting
-    { msg = _("Scanning for networks…"), icon = ICON_CONNECTING }, -- NetworkMgr:reconnectOrShowNetworkMenu
-    { msg = _("Connection failed"), icon = ICON_DISCONNECTED }, -- NetworkMgr:reconnectOrShowNetworkMenu
-    { msg = _("Error connecting to the network"), icon = ICON_DISCONNECTED }, -- NetworkMgr
-    { msg = _("Unable to communicate with the Wi-Fi backend"), icon = ICON_DISCONNECTED }, -- Kindle getNetworkList
-    { msg = _("Scanning for Wi-Fi networks timed out"), icon = ICON_DISCONNECTED }, -- Kindle getNetworkList
-    { msg = _("Connecting to Wi-Fi…"), icon = ICON_CONNECTING },
-    { msg = _("Waiting for network connectivity…"), icon = ICON_CONNECTING },
-    { msg = _("Turning on Wi-Fi…"), icon = ICON_CONNECTING },
+    { msg = _("Connecting to network %1…"), state = "connecting" }, -- NetworkMgr (Kindle)
+    { msg = _("Connected to network %1"), state = "connected" }, -- NetworkMgr, NetworkSetting
+    { msg = _("Scanning for networks…"), state = "connecting" }, -- NetworkMgr:reconnectOrShowNetworkMenu
+    { msg = _("Connection failed"), state = "failed" }, -- NetworkMgr:reconnectOrShowNetworkMenu
+    { msg = _("Error connecting to the network"), state = "failed" }, -- NetworkMgr
+    { msg = _("Unable to communicate with the Wi-Fi backend"), state = "failed" }, -- Kindle getNetworkList
+    { msg = _("Scanning for Wi-Fi networks timed out"), state = "failed" }, -- Kindle getNetworkList
+    { msg = _("Connecting to Wi-Fi…"), state = "connecting" },
+    { msg = _("Waiting for network connectivity…"), state = "connecting" },
+    { msg = _("Turning on Wi-Fi…"), state = "connecting" },
     { msg = _("Turning off Wi-Fi…") },
-    { msg = _("Wi-Fi off."), icon = ICON_DISCONNECTED },
-    { msg = _("Already connected to network %1."), icon = ICON_CONNECTED },
-    { msg = _("Already connected."), icon = ICON_CONNECTED },
+    { msg = _("Disconnecting…") }, -- NetworkSetting, before joining another network
+    { msg = _("Wi-Fi off."), state = "off" },
+    { msg = _("Already connected to network %1."), state = "connected" },
+    { msg = _("Already connected."), state = "connected" },
     { msg = _("You can now retry the action that required network access") },
 }
 for __, entry in ipairs(INTERCEPTED_MESSAGES) do
@@ -75,19 +80,26 @@ end
 
 -- Module-level, so the icon and the UIManager.show patch are shared between
 -- the FileManager and ReaderUI instances of the plugin.
-local icon_frame
+local icon_frame, icon_frame_name
 local hideIcon, showIcon
 
 hideIcon = function()
     UIManager:unschedule(hideIcon)
     if icon_frame then
         UIManager:close(icon_frame, "ui")
-        icon_frame = nil
+        icon_frame, icon_frame_name = nil, nil
     end
 end
 
-showIcon = function(icon_name)
+showIcon = function(icon_name, timeout)
+    if icon_frame and icon_frame_name == icon_name then
+        -- Already showing it: just restart the timer, no extra e-ink refresh.
+        UIManager:unschedule(hideIcon)
+        UIManager:scheduleIn(timeout, hideIcon)
+        return
+    end
     hideIcon()
+    icon_frame_name = icon_name
     icon_frame = FrameContainer:new{
         bordersize = 0,
         padding = Size.padding.small,
@@ -101,8 +113,27 @@ showIcon = function(icon_name)
     }
     local margin = Screen:scaleBySize(ICON_MARGIN)
     UIManager:show(icon_frame, "ui", nil, margin, margin)
-    UIManager:scheduleIn(ICON_TIMEOUT_S, hideIcon)
+    UIManager:scheduleIn(timeout, hideIcon)
 end
+
+-- Status presentation. Everything about how Wi-Fi status looks lives here: the engine
+-- (wificonnect.lua), KOReader's Network events and the intercepted popups only report a
+-- state. Unknown states (e.g. "idle") just hide the icon.
+local PRESENTATION = {
+    connecting = { icon = ICON_CONNECTING, timeout = CONNECTING_MAX_S },
+    connected = { icon = ICON_CONNECTED, timeout = ICON_TIMEOUT_S },
+    failed = { icon = ICON_DISCONNECTED, timeout = ICON_TIMEOUT_S },
+    off = { icon = ICON_DISCONNECTED, timeout = ICON_TIMEOUT_S },
+}
+
+local function presentStatus(state)
+    local look = PRESENTATION[state]
+    if not look or not G_reader_settings:nilOrTrue("wifiindicator_show_icon") then
+        return hideIcon()
+    end
+    showIcon(look.icon, look.timeout)
+end
+wificonnect.on_status = presentStatus
 
 local function interceptedIcon(widget)
     if not widget or type(widget.text) ~= "string" then
@@ -123,8 +154,8 @@ if not UIManager._wifiindicator_orig_show then
             local entry = interceptedIcon(widget)
             if entry then
                 logger.dbg("WifiIndicator: suppressed popup:", widget.text)
-                if entry.icon and G_reader_settings:nilOrTrue("wifiindicator_show_icon") then
-                    showIcon(entry.icon)
+                if entry.state then
+                    presentStatus(entry.state)
                 end
                 return
             end
@@ -227,7 +258,7 @@ function WifiIndicator:addToMainMenu(menu_items)
             end,
         },
     }
-    if nbwifi.installed then
+    if wificonnect.installed then
         table.insert(sub_item_table, {
             text = _("Non-blocking Wi-Fi connect"),
             help_text = _("Connect to Wi-Fi in the background instead of freezing the interface. Takes effect on the next connection attempt."),
@@ -263,16 +294,12 @@ end
 -- the connection state changed (the Kindle Wi-Fi restore on wakeup is
 -- asynchronous, and doesn't necessarily go through any of the popups above).
 function WifiIndicator:onNetworkConnected()
-    if G_reader_settings:nilOrTrue("wifiindicator_show_icon") then
-        showIcon(ICON_CONNECTED)
-    end
+    presentStatus("connected")
     -- Don't return true: NetworkListener & co. need this event, too.
 end
 
 function WifiIndicator:onNetworkDisconnected()
-    if G_reader_settings:nilOrTrue("wifiindicator_show_icon") then
-        showIcon(ICON_DISCONNECTED)
-    end
+    presentStatus("off")
 end
 
 -- Don't leave a stale icon around across suspend/exit.

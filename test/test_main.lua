@@ -1,8 +1,8 @@
--- One-off test harness for wifiindicator.koplugin.
--- Run from the koreader repo root:
---   luajit plugins/wifiindicator.koplugin/test/test_main.lua plugins/wifiindicator.koplugin/main.lua
+-- Test harness for wifiindicator.koplugin: stubs the KOReader modules and loads the real plugin.
+-- Run from the repo root (main.lua's require("wificonnect") resolves via ./?.lua):
+--   luajit test/test_main.lua main.lua
 
-local plugin_path = arg[1] or "plugins/wifiindicator.koplugin/main.lua"
+local plugin_path = arg[1] or "main.lua"
 
 -- ---------------------------------------------------------------- stubs --
 local shown = {}
@@ -49,10 +49,6 @@ package.preload["ffi/blitbuffer"] = function() return { COLOR_WHITE = 0 } end
 package.preload["device"] = function()
     return {
         screen = { scaleBySize = function(_, n) return n end },
-        -- nbwifi.lua platform gate: not a supported device (not Kindle, and the
-        -- NetworkMgr stub has no wpa_supplicant), so the bundled engine stays
-        -- uninstalled under this harness.
-        isKindle = function() return false end,
     }
 end
 package.preload["ui/widget/container/framecontainer"] = function()
@@ -92,6 +88,7 @@ package.preload["ui/widget/iconbutton"] = function()
     return IconButton
 end
 package.preload["ui/network/manager"] = function()
+    -- No wpa_supplicant field: wificonnect.install() stays a no-op under this harness.
     return {
         isWifiOn = function() return wifi.on end,
         isConnected = function() return wifi.connected end,
@@ -233,6 +230,39 @@ check(#deleted == 4
     and deleted[3] == "wifiindicator_show_icon"
     and deleted[4] == "wifiindicator_suppress_popups",
     "settings: deletePluginSettings removes all four keys")
+
+-- ---------------------------------------------------- status presenter --
+local scheduled = {}
+UIManager.scheduleIn = function(self, seconds) table.insert(scheduled, seconds) end
+local wificonnect = require("wificonnect") -- the same module table main.lua wired up
+local function lastIcon()
+    local frame = shown[#shown]
+    return frame and frame[1] and frame[1].icon
+end
+settings_data.wifiindicator_show_icon = true
+
+shown, scheduled = {}, {}
+wificonnect.on_status("connecting")
+check(lastIcon() == "wifi.open.50" and scheduled[#scheduled] == 90,
+    "presenter: connecting shows the connecting icon, capped at 90 s")
+wificonnect.on_status("connecting")
+check(#shown == 1 and #scheduled == 2,
+    "presenter: same state again restarts the timer without redrawing")
+wificonnect.on_status("connected", { ssid = "Home" })
+check(lastIcon() == "wifi.open.100" and scheduled[#scheduled] == 3,
+    "presenter: connected shows the connected icon for 3 s")
+WifiIndicator.onNetworkDisconnected(WifiIndicator)
+check(lastIcon() == "wifi.open.0", "presenter: NetworkDisconnected shows the off icon")
+
+shown = {}
+UIManager:show({ text = "Turning on Wi-Fi…" })
+check(#shown == 1 and lastIcon() == "wifi.open.50",
+    "presenter: intercepted popup is replaced by its status icon")
+
+settings_data.wifiindicator_show_icon = false
+shown = {}
+wificonnect.on_status("connected")
+check(#shown == 0, "presenter: icon setting off -> nothing shown")
 
 print(failures == 0 and "ALL TESTS PASSED" or (failures .. " TEST(S) FAILED"))
 os.exit(failures == 0 and 0 or 1)
