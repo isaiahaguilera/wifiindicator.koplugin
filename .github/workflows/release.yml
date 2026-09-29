@@ -1,0 +1,50 @@
+# Publishes a release when a vX.Y.Z tag is pushed:
+#   git tag v2.0.1 && git push origin v2.0.1
+# Runs the tests, checks the tag matches _meta.lua's version, then attaches
+# wifistatus.koplugin.zip (just the files the plugin needs on the device).
+# Storefront installs that attachment and compares its tag with _meta.lua.
+name: Release
+
+on:
+  push:
+    tags: ["v*"]
+
+permissions:
+  contents: write
+
+jobs:
+  release:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install LuaJIT
+        run: sudo apt-get update && sudo apt-get install -y luajit
+
+      - name: Run the tests
+        run: |
+          luajit test/test_main.lua main.lua
+          luajit test/test_wificonnect.lua
+          luajit test/test_engine.lua
+
+      - name: Check the tag matches _meta.lua
+        run: |
+          meta_version=$(sed -n 's/^ *version = "\(.*\)",.*/\1/p' _meta.lua)
+          if [ "v$meta_version" != "$GITHUB_REF_NAME" ]; then
+            echo "::error::Tag $GITHUB_REF_NAME doesn't match _meta.lua version $meta_version"
+            exit 1
+          fi
+
+      - name: Build wifistatus.koplugin.zip
+        run: |
+          mkdir -p dist/wifistatus.koplugin
+          cp main.lua wificonnect.lua _meta.lua dist/wifistatus.koplugin/
+          cd dist && zip -r wifistatus.koplugin.zip wifistatus.koplugin
+
+      - name: Publish the release
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: >
+          gh release create "$GITHUB_REF_NAME" dist/wifistatus.koplugin.zip
+          --title "Wi-Fi status & connect $GITHUB_REF_NAME"
+          --generate-notes

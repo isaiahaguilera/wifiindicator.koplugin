@@ -261,7 +261,7 @@ if not TouchMenu._wifiindicator_orig_updateItems then
 end
 
 local WifiIndicator = WidgetContainer:extend{
-    name = "wifiindicator",
+    name = "wifistatus", -- KOReader overrides this with the folder name (wifistatus.koplugin)
     is_doc_only = false,
 }
 

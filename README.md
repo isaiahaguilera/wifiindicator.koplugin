@@ -58,17 +58,26 @@ disconnect first to edit it.
 
 ## Install
 
-1. Connect the Kobo over USB. KOReader lives in the hidden `.adds/koreader/`
-   folder.
-2. Create `.adds/koreader/plugins/wifiindicator.koplugin/` and copy
-   **`main.lua`**, **`wificonnect.lua`** and **`_meta.lua`** into it. Nothing
-   else is needed on the device.
-3. Updating from an older version: delete `nbwifi.lua` from that folder if
-   it's there.
+1. Download **`wifistatus.koplugin.zip`** from the
+   [latest release](../../releases/latest) and unzip it. It contains a
+   `wifistatus.koplugin/` folder with the three files the plugin needs.
+2. Connect the Kobo over USB and copy that folder into the hidden
+   `.adds/koreader/plugins/` folder.
+3. **Upgrading from an older version** (named `wifiindicator.koplugin`, or the
+   original asxelot plugin): delete the old `wifiindicator.koplugin` folder, so
+   there aren't two copies. Your settings carry over.
 4. Eject, then restart KOReader.
 
 On devices that don't use wpa_supplicant (anything but Kobo and similar), the
 background connect stays off; the popup hiding and the icons still work.
+
+### Updating with Storefront
+
+The [Storefront](https://github.com/ultimatejimmy/storefront.koplugin) plugin
+can check this repo's releases and update the plugin in one tap. Link the
+installed plugin to **this repository** in Storefront once. Don't accept an
+update that points at `asxelot/wifiindicator.koplugin`: that's the original
+plugin (v1.0.0), and installing it would replace this one.
 
 ## How it works
 
@@ -102,6 +111,15 @@ luajit test/test_engine.lua          # engine: simulated connect flows (fake KOR
 The engine simulation checks flow and bookkeeping; real timing and hardware
 behavior need a device. `CLAUDE.md` holds the project's working notes and
 history, and `docs/plan-wpa-handoff.md` explains the engine's design.
+
+### Releasing
+
+1. Bump `version` in `_meta.lua` (e.g. `2.0.1`) and commit.
+2. Tag and push: `git tag v2.0.1 && git push origin main v2.0.1`.
+
+The **Release** workflow (`.github/workflows/release.yml`) runs the tests,
+checks the tag matches `_meta.lua`, and publishes the release with
+`wifistatus.koplugin.zip` attached. Storefront picks it up from there.
 
 ## Credits & license
 
