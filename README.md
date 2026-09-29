@@ -35,6 +35,10 @@ Both icons use KOReader's built-in icons, one per state:
 When you turn Wi-Fi on and no saved network is in range, the network list
 opens instead (no warning: nothing went wrong, it's your pick). A wake-from-sleep
 reconnect that finds no saved network just turns Wi-Fi back off quietly.
+
+In network lists the plugin opens, a network broadcast by several radios (a
+dual-band 2.4/5 GHz router, or a mesh) appears once: connecting is by name, and
+the Kobo picks the radio itself.
 - **Non-blocking Wi-Fi connect** (Kobo & other wpa_supplicant devices).
   Stock KOReader connects synchronously in the UI thread, freezing the device
   for the duration (hardware bring-up, scan, association, DHCP). The bundled

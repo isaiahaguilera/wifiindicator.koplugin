@@ -287,11 +287,18 @@ check(now >= 15 and now <= 16, "E: gives up after about 15 s of waiting for a jo
 
 -- E1: saved network not in range, interactive -> the list, reported as "choose", not a problem
 scenario{ in_range = {}, saved = { Home = { ssid = "Home", password = "x", psk = "ab" } } }
-NetworkMgr.getNetworkList = function() return { { ssid = "Neighbor", signal_quality = 40 } } end
+NetworkMgr.getNetworkList = function()
+    return { -- a dual-band neighbor: one entry per radio
+        { ssid = "Neighbor", bssid = "n:5", signal_quality = 40 },
+        { ssid = "Neighbor", bssid = "n:2", signal_quality = 55 },
+    }
+end
 NetworkMgr:turnOnWifi(nil, true)
 run()
 check(statuses[#statuses] == "choose" and not has(statuses, "problem") and UIManager.shown[1],
     "E1: interactive, nothing joins -> 'choose' and the network list, no problem icon")
+check(#UIManager.shown[1].network_list == 1 and UIManager.shown[1].network_list[1].bssid == "n:2",
+    "E1: the list shows a dual-band network once (its strongest radio)")
 
 -- E2: nothing to try at all, interactive -> skip the wait, straight to the list
 scenario{ in_range = {}, saved = {} }

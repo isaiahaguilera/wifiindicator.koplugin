@@ -85,6 +85,38 @@ function M.pickNetworks(saved, known)
     return picked
 end
 
+-- One entry per network name, for the network list. A dual-band router (or a mesh) shows
+-- up once per radio, but connecting is by name and wpa_supplicant picks the radio. Keeps the
+-- strongest entry; if the device is on one of the dropped radios, the kept entry shows as
+-- connected instead. Entries without a name are left alone. Order is preserved.
+function M.mergeBySSID(list)
+    local best, on = {}, {}
+    for _, nw in ipairs(list) do
+        local ssid = nw.ssid
+        if ssid and ssid ~= "" then
+            if not best[ssid] or (nw.signal_quality or 0) > (best[ssid].signal_quality or 0) then
+                best[ssid] = nw
+            end
+            if nw.connected then on[ssid] = nw end
+        end
+    end
+    local merged = {}
+    for _, nw in ipairs(list) do
+        local ssid = nw.ssid
+        if not ssid or ssid == "" then
+            table.insert(merged, nw)
+        elseif best[ssid] == nw then
+            local current = on[ssid]
+            if current and current ~= nw then
+                nw.connected = true
+                nw.wpa_supplicant_id = current.wpa_supplicant_id
+            end
+            table.insert(merged, nw)
+        end
+    end
+    return merged
+end
+
 local POLL_INTERVAL = 0.25
 local BRINGUP_TIMEOUT_S = 30
 local JOIN_TIMEOUT_S = 15 -- same as restore-wifi-async.sh
@@ -436,7 +468,7 @@ function M.install()
             local NetworkSetting = require("ui/widget/networksetting")
             patchNetworkList(NetworkSetting)
             UIManager:show(NetworkSetting:new{
-                network_list = list,
+                network_list = M.mergeBySSID(list),
                 connect_callback = connect_callback,
             })
         end

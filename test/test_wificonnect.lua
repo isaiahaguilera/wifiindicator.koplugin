@@ -66,5 +66,28 @@ check(picked[1] == saved.Home, "pickNetworks: returns the saved entries themselv
 check(#M.pickNetworks(saved, nil) == 4, "pickNetworks: nil known list -> every usable saved network")
 check(#M.pickNetworks(nil, known) == 0, "pickNetworks: nil saved list -> nothing")
 
+-- -------------------------------------------------------- mergeBySSID --
+local function ssids(list)
+    local out = {}
+    for i, nw in ipairs(list) do out[i] = nw.ssid or "<nil>" end
+    return table.concat(out, ",")
+end
+local home5 = { ssid = "Home", bssid = "aa:5", signal_quality = 80 }
+local home24 = { ssid = "Home", bssid = "aa:2", signal_quality = 60, connected = true, wpa_supplicant_id = "3" }
+local merged = M.mergeBySSID({
+    home5,
+    { ssid = "Cafe", signal_quality = 70 },
+    home24,
+    { ssid = "", signal_quality = 10 },
+    { signal_quality = 5 },
+})
+check(ssids(merged) == "Home,Cafe,,<nil>", "mergeBySSID: one row per name, order kept, unnamed entries untouched")
+check(merged[1] == home5, "mergeBySSID: keeps the strongest radio")
+check(home5.connected == true and home5.wpa_supplicant_id == "3",
+    "mergeBySSID: connected mark (and its wpa id) moves to the kept row")
+local single = { { ssid = "A", signal_quality = 1 }, { ssid = "B", signal_quality = 2 } }
+check(#M.mergeBySSID(single) == 2 and not single[1].connected, "mergeBySSID: distinct names unchanged")
+check(#M.mergeBySSID({}) == 0, "mergeBySSID: empty list")
+
 print(failures == 0 and "ALL TESTS PASSED" or (failures .. " TEST(S) FAILED"))
 os.exit(failures == 0 and 0 or 1)
