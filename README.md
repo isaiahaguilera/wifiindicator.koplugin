@@ -15,13 +15,26 @@ especially noisy on devices that restore Wi-Fi after every wake from sleep
   `NetworkMgr` (scanning, connecting, connected, failed, backend errors,
   Wi-Fi on/off) never appear. Matching is done against the exact source
   strings resolved through gettext, so it works in any UI language.
-- **Corner toast instead.** A small transient Wi-Fi icon appears in the
-  top-left corner for 3 seconds on connect/disconnect — same timeout as the
-  popups it replaces, transparent to input.
+- **Corner status icon instead.** A small icon in the top-left corner,
+  transparent to input. It stays up while connecting, then shows the result
+  briefly.
 - **Menu-bar status icon.** A Wi-Fi icon sits in the drop-down menu's footer,
-  left of the clock and battery: full waves = connected, half = Wi-Fi on but
-  not connected, empty = off. **Tap it to toggle Wi-Fi** (broadcasts the same
-  `ToggleWifi` event as the gesture action).
+  left of the clock and battery. **Tap it to toggle Wi-Fi** (broadcasts the
+  same `ToggleWifi` event as the gesture action).
+
+Both icons use KOReader's built-in icons, one per state:
+
+| Icon | State | Corner |
+|---|---|---|
+| all waves faint (`wifi.open.0`) | Wi-Fi off | 3 s |
+| dot only (`wifi.open.25`) | Wi-Fi on, not connected | — (menu bar only) |
+| half the waves (`wifi.open.50`) | connecting | until it finishes |
+| full (`wifi.open.100`) | connected | 3 s |
+| warning triangle (`notice-warning`) | something went wrong | 5 s |
+
+When you turn Wi-Fi on and no saved network is in range, the network list
+opens instead (no warning: nothing went wrong, it's your pick). A wake-from-sleep
+reconnect that finds no saved network just turns Wi-Fi back off quietly.
 - **Non-blocking Wi-Fi connect** (Kobo & other wpa_supplicant devices).
   Stock KOReader connects synchronously in the UI thread, freezing the device
   for the duration (hardware bring-up, scan, association, DHCP). The bundled
@@ -70,8 +83,8 @@ The connect engine (`wificonnect.lua`) replaces `NetworkMgr:turnOnWifi`,
 per-network connect. Once wpa_supplicant is up, it adds every KOReader-saved
 network it doesn't already know (in memory only; the Kobo OS's config file is
 never touched) and lets wpa_supplicant pick one. It shows no popups itself; it
-reports `connecting` / `connected` / `failed`, and `main.lua` turns that into
-the corner icon.
+reports its state (`connecting`, `connected`, `problem`, …), and `main.lua`'s
+`LOOKS` table turns states into icons.
 
 ### Caveat
 

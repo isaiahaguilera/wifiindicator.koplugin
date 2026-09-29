@@ -1,6 +1,6 @@
 # Plan: hand KOReader's saved networks to wpa_supplicant
 
-_Status: approved 2026-09-28. Phases 0–5 done on branch `wpa-handoff` (2026-09-28); phase 6 (on-device testing) is next. Checked against KOReader **v2026.07.1**._
+_Status: **done**. Scenarios A, C and I passed on the Clara BW, and it was merged into `main` on 2026-09-28. Checked against KOReader **v2026.07.1**. Kept as a record. Later change: the `failed` state below was replaced on branch `icon-states` by `problem` / `choose` / `off` (see the `LOOKS` table in `main.lua` and `CLAUDE.md`)._
 
 This replaces `nbwifi.lua` with a smaller Kobo-only connect engine, built on its own branch and merged only if on-device testing shows it works better than `main`. Background and the KOReader source findings behind it are in `CLAUDE.md` under *Project context*.
 

@@ -166,12 +166,13 @@ end
 check(icon_count == 1, "menu icon: double plugin load still injects exactly one icon")
 
 -- ---------------------------------------------- menu icon: state refresh --
+local wificonnect = require("wificonnect") -- the same module table main.lua wired up
 wifi.on, wifi.connected = true, true
 local menu_state = newMenu()
 wifi.on, wifi.connected = true, false
 FakeTouchMenu.updateItems(menu_state)
-check(menu_state._wifiindicator_icon.icon == "wifi.open.50",
-    "menu icon: on-but-disconnected -> wifi.open.50 after updateItems")
+check(menu_state._wifiindicator_icon.icon == "wifi.open.25",
+    "menu icon: on-but-disconnected -> wifi.open.25 (dot only) after updateItems")
 wifi.on, wifi.connected = false, false
 FakeTouchMenu.updateItems(menu_state)
 check(menu_state._wifiindicator_icon.icon == "wifi.open.0",
@@ -180,6 +181,22 @@ wifi.on, wifi.connected = true, true
 FakeTouchMenu.updateItems(menu_state)
 check(menu_state._wifiindicator_icon.icon == "wifi.open.100",
     "menu icon: connected -> wifi.open.100 after updateItems")
+
+wificonnect.state = "connecting"
+wifi.on, wifi.connected = false, false -- radio still off during bring-up
+FakeTouchMenu.updateItems(menu_state)
+check(menu_state._wifiindicator_icon.icon == "wifi.open.50",
+    "menu icon: engine connecting -> wifi.open.50, even before the radio is up")
+wificonnect.state = "problem"
+wifi.on, wifi.connected = true, false
+FakeTouchMenu.updateItems(menu_state)
+check(menu_state._wifiindicator_icon.icon == "notice-warning",
+    "menu icon: engine problem while on and not connected -> warning")
+wifi.on, wifi.connected = false, false
+FakeTouchMenu.updateItems(menu_state)
+check(menu_state._wifiindicator_icon.icon == "wifi.open.0",
+    "menu icon: a past problem doesn't linger once Wi-Fi is off")
+wificonnect.state = nil
 
 settings_data.wifiindicator_menu_icon = false
 local menu_state_off = newMenu()
@@ -234,7 +251,6 @@ check(#deleted == 4
 -- ---------------------------------------------------- status presenter --
 local scheduled = {}
 UIManager.scheduleIn = function(self, seconds) table.insert(scheduled, seconds) end
-local wificonnect = require("wificonnect") -- the same module table main.lua wired up
 local function lastIcon()
     local frame = shown[#shown]
     return frame and frame[1] and frame[1].icon
@@ -253,6 +269,20 @@ check(lastIcon() == "wifi.open.100" and scheduled[#scheduled] == 3,
     "presenter: connected shows the connected icon for 3 s")
 WifiIndicator.onNetworkDisconnected(WifiIndicator)
 check(lastIcon() == "wifi.open.0", "presenter: NetworkDisconnected shows the off icon")
+wificonnect.on_status("problem")
+check(lastIcon() == "notice-warning" and scheduled[#scheduled] == 5,
+    "presenter: problem shows the warning triangle for 5 s")
+local closed = 0
+UIManager.close = function() closed = closed + 1 end
+local shown_before = #shown
+wificonnect.on_status("choose")
+check(closed == 1 and #shown == shown_before,
+    "presenter: 'choose' (network list up) hides the icon instead of drawing one")
+
+shown = {}
+UIManager:show({ text = "Error connecting to the network" })
+check(#shown == 1 and lastIcon() == "notice-warning",
+    "presenter: KOReader's connection error popup becomes the warning triangle")
 
 shown = {}
 UIManager:show({ text = "Turning on Wi-Fi…" })

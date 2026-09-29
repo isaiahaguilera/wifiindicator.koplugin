@@ -147,10 +147,14 @@ function NetworkMgr:getNetworkList()
 end
 
 -- Fake subprocesses: run the task inline, but restore NetworkMgr afterwards like a fork would.
+-- fail_spawn_at = n makes the n-th spawn of a scenario fail (on_done(false)).
 local fd_data = {}
 local next_pid = 100
+local fail_spawn_at, spawn_count = nil, 0
 local ffiutil = {
     runInSubProcess = function(fn)
+        spawn_count = spawn_count + 1
+        if fail_spawn_at == spawn_count then return nil end
         next_pid = next_pid + 1
         local fd = next_pid
         local snapshot = {}
@@ -237,7 +241,7 @@ local function has(list, item)
     return false
 end
 local function scenario(opts)
-    now, queue, calls, statuses = 0, {}, {}, {}
+    now, queue, calls, statuses, spawn_count = 0, {}, {}, {}, 0
     UIManager.shown = {}
     settings = {}
     resetWpa(opts.in_range)
@@ -277,16 +281,26 @@ scenario{ in_range = {}, saved = { Home = { ssid = "Home", password = "x", psk =
 cb = 0
 NetworkMgr:turnOnWifi(function() cb = cb + 1 end, false)
 run()
-check(cb == 0 and has(calls, "abort") and statuses[#statuses] == "failed",
-    "E: no join -> failed, _abortWifiConnection, no callback")
-check(now <= 16, "E: gives up after about 15 s of waiting for a join")
+check(cb == 0 and has(calls, "abort") and statuses[#statuses] == "problem" and M.state == "problem",
+    "E: no join for an action that needed the network -> problem, _abortWifiConnection, no callback")
+check(now >= 15 and now <= 16, "E: gives up after about 15 s of waiting for a join")
 
--- E2: nothing in range, interactive -> network list, Wi-Fi stays on
+-- E1: saved network not in range, interactive -> the list, reported as "choose", not a problem
+scenario{ in_range = {}, saved = { Home = { ssid = "Home", password = "x", psk = "ab" } } }
+NetworkMgr.getNetworkList = function() return { { ssid = "Neighbor", signal_quality = 40 } } end
+NetworkMgr:turnOnWifi(nil, true)
+run()
+check(statuses[#statuses] == "choose" and not has(statuses, "problem") and UIManager.shown[1],
+    "E1: interactive, nothing joins -> 'choose' and the network list, no problem icon")
+
+-- E2: nothing to try at all, interactive -> skip the wait, straight to the list
 scenario{ in_range = {}, saved = {} }
+NetworkMgr.getNetworkList = function() return {} end
 NetworkMgr:turnOnWifi(nil, true)
 run()
 check(not has(calls, "abort") and UIManager.shown[1] and #UIManager.shown[1].network_list == 0,
     "E2: interactive failure with an empty scan (after one rescan) shows an empty list, like stock")
+check(now < 5, "E2: nothing to try -> no 15 s join wait")
 scenario{ in_range = {}, saved = {} }
 wpa.in_range = {}
 NetworkMgr.getNetworkList = function() return { { ssid = "Neighbor", signal_quality = 40 } } end
@@ -305,6 +319,7 @@ NetworkMgr:disableWifi()
 run()
 check(cb == 0 and #statuses == 1 and not has(calls, "obtainIP"),
     "G: disableWifi cancels the attempt: no callback, no DHCP, no further status")
+check(M.state == "idle", "G: a cancelled attempt no longer reads as connecting")
 
 -- C: wake from sleep restores KOReader-only networks
 scenario{ in_range = { Home = true }, saved = { Home = { ssid = "Home", password = "x", psk = "ab" } } }
@@ -312,6 +327,22 @@ NetworkMgr:restoreWifiAsync()
 run()
 check(not has(calls, "stock restore") and statuses[#statuses] == "connected" and NetworkMgr.lease_ssid == "Home",
     "C: restoreWifiAsync hands off KOReader networks and connects")
+
+-- C2: wake away from home: quietly gives up, no problem icon
+scenario{ in_range = {}, saved = { Home = { ssid = "Home", password = "x", psk = "ab" } } }
+NetworkMgr:restoreWifiAsync()
+run()
+check(statuses[#statuses] == "off" and not has(statuses, "problem") and has(calls, "abort"),
+    "C2: restore with no known network nearby -> quietly 'off', Wi-Fi torn down")
+
+-- D: joins, but DHCP never completes -> that's a real problem, even for the quiet restore
+scenario{ in_range = { Home = true }, saved = { Home = { ssid = "Home", password = "x", psk = "ab" } } }
+fail_spawn_at = 2 -- 1st subprocess: bring-up, 2nd: DHCP
+NetworkMgr:restoreWifiAsync()
+run()
+fail_spawn_at = nil
+check(statuses[#statuses] == "problem" and has(calls, "abort") and NetworkMgr.lease_ssid == nil,
+    "D: DHCP failure -> problem, even on a background restore")
 
 -- Kill switch
 scenario{ in_range = { Home = true }, saved = {} }
@@ -351,8 +382,8 @@ run()
 check(has(calls, "item disconnect"), "J: disconnects the previously connected item first, like stock")
 check(has(wpa.commands, "REMOVE 0") and has(wpa.commands, "ENABLE all"),
     "J: failure removes the network and undoes SELECT_NETWORK")
-check(statuses[#statuses] == "failed" and UIManager.shown[#UIManager.shown].text == "Timed out",
-    "J: failure reports failed and tells the user in the list")
+check(statuses[#statuses] == "problem" and UIManager.shown[#UIManager.shown].text == "Timed out",
+    "J: failure reports a problem and tells the user in the list")
 
 print(failures == 0 and "ALL TESTS PASSED" or (failures .. " TEST(S) FAILED"))
 os.exit(failures == 0 and 0 or 1)

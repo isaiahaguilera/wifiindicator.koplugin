@@ -13,7 +13,10 @@ and lets wpa_supplicant pick. See docs/plan-wpa-handoff.md.
 Slow steps (hardware bring-up, DHCP, the fallback scan) run in forked subprocesses and
 association is polled every 250 ms, so the UI thread never blocks. The engine shows no popups
 of its own: it reports its state through M.on_status(state, info), and main.lua decides how
-to present it. States: "connecting", "connected" (info.ssid), "failed".
+to present it. The latest one is kept in M.state. States:
+  "connecting"; "connected" (info.ssid); "problem" (something actually went wrong);
+  "choose" (nothing to join, the network list is up for the user); "off" (a background
+  restore quietly gave up); "idle" (the attempt was cancelled).
 
 The top part is pure logic with no KOReader dependencies, so test/test_wificonnect.lua can
 exercise it on a desktop LuaJIT. M.install() hooks NetworkMgr.
@@ -22,6 +25,7 @@ exercise it on a desktop LuaJIT. M.install() hooks NetworkMgr.
 local M = {
     installed = false,
     on_status = function(state, info) end, -- replaced by main.lua
+    state = nil, -- the latest reported state
 }
 
 -- wpa_supplicant escapes non-printable SSID bytes as \xNN, and backslashes as \\.
@@ -121,6 +125,7 @@ function M.install()
     end
 
     local function report(state, info)
+        M.state = state
         M.on_status(state, info)
     end
 
@@ -131,6 +136,9 @@ function M.install()
         local orig = NetworkMgr[method]
         NetworkMgr[method] = function(self, ...)
             gen = gen + 1
+            if M.state == "connecting" then
+                M.state = "idle" -- cancelled; KOReader's own events report the outcome
+            end
             return orig(self, ...)
         end
     end
@@ -296,13 +304,18 @@ function M.install()
     end
 
     -- Hand every KOReader-saved network wpa_supplicant doesn't know yet over to it.
+    -- Returns how many networks wpa_supplicant now has to try (nil if unreachable).
     local function handOff()
-        withWpa(function(wcli)
-            for __, nw in ipairs(M.pickNetworks(NetworkMgr:getAllSavedNetworks().data, wcli:listNetworks())) do
+        return withWpa(function(wcli)
+            local known = wcli:listNetworks() or {}
+            local count = #known
+            for __, nw in ipairs(M.pickNetworks(NetworkMgr:getAllSavedNetworks().data, known)) do
                 if addNetwork(wcli, nw) then
+                    count = count + 1
                     logger.dbg("wificonnect: handed network to wpa_supplicant:", nw.ssid)
                 end
             end
+            return count
         end)
     end
 
@@ -315,18 +328,18 @@ function M.install()
         end)
     end
 
-    -- Wait for wpa_supplicant to join a network, then DHCP. on_done(ssid) on success,
-    -- on_done(nil) on failure.
+    -- Wait for wpa_supplicant to join a network, then DHCP. on_done(ssid) on success;
+    -- on failure on_done(nil, "nojoin") (nothing joined) or on_done(nil, "dhcp").
     local function joinAndGetIP(on_done)
         pollUntil(associated, JOIN_TIMEOUT_S, function(nw)
             if not nw then
                 logger.dbg("wificonnect: no network joined within", JOIN_TIMEOUT_S, "s")
-                return on_done(nil)
+                return on_done(nil, "nojoin")
             end
             subprocessCall(function() NetworkMgr:obtainIP() end, DHCP_TIMEOUT_S, function(ok)
                 if not ok then
                     logger.warn("wificonnect: DHCP failed or timed out on", nw.ssid)
-                    return on_done(nil)
+                    return on_done(nil, "dhcp")
                 end
                 -- Same bookkeeping as stock, so hasLeaseForCurrentNetwork() works (#14790).
                 NetworkMgr.lease_ssid = nw.ssid
@@ -347,7 +360,7 @@ function M.install()
         end, BRINGUP_TIMEOUT_S, function(ok)
             if ok then return on_up() end
             logger.warn("wificonnect: Wi-Fi hardware bring-up failed or timed out")
-            report("failed")
+            report("problem")
             NetworkMgr:_abortWifiConnection()
         end)
     end
@@ -386,7 +399,7 @@ function M.install()
                 return id
             end)
             if not nw_id then
-                report("failed")
+                report("problem")
                 return
             end
             joinAndGetIP(function(ssid)
@@ -404,7 +417,7 @@ function M.install()
                         wcli:removeNetwork(nw_id)
                         wcli:enableNetworkByID("all") -- undo SELECT_NETWORK
                     end)
-                    report("failed")
+                    report("problem")
                     -- The user is looking at the list and expects an answer there.
                     UIManager:show(InfoMessage:new{ text = _("Timed out"), timeout = 3 })
                 end
@@ -417,7 +430,7 @@ function M.install()
     local function scanThenShowList(connect_callback)
         local function show(ok, list)
             if not ok or not list then
-                report("failed")
+                report("problem")
                 return NetworkMgr:_abortWifiConnection()
             end
             local NetworkSetting = require("ui/widget/networksetting")
@@ -439,24 +452,34 @@ function M.install()
     end
 
     -- Everything after bring-up: hand off, wait for a join, DHCP, then finish like stock.
-    local function connect(complete_callback, interactive)
+    -- quiet: a background restore (wake/startup) that finds nothing to join isn't a problem,
+    -- it just gives up.
+    local function connect(complete_callback, interactive, quiet)
         local long_press = NetworkMgr.wifi_toggle_long_press
         NetworkMgr.wifi_toggle_long_press = nil
-        handOff()
-        joinAndGetIP(function(ssid)
-            if ssid then
-                if complete_callback then complete_callback() end
-                report("connected", { ssid = ssid })
-                if long_press then scanThenShowList() end -- the user asked for the list
+        local function giveUp(reason)
+            if interactive then
+                -- Like stock: let the user pick a network; Wi-Fi stays on. Nothing joining
+                -- isn't an error, the list is the message; a DHCP failure is.
+                report(reason == "dhcp" and "problem" or "choose")
+                scanThenShowList(complete_callback)
             else
-                report("failed")
-                if interactive then
-                    -- Like stock: let the user pick a network; Wi-Fi stays on.
-                    scanThenShowList(complete_callback)
-                else
-                    NetworkMgr:_abortWifiConnection()
-                end
+                report((quiet and reason ~= "dhcp") and "off" or "problem")
+                NetworkMgr:_abortWifiConnection()
             end
+        end
+        if handOff() == 0 then
+            -- Nothing to try: skip the join wait, like stock does in this case.
+            logger.dbg("wificonnect: wpa_supplicant has no networks to try")
+            return giveUp("nojoin")
+        end
+        joinAndGetIP(function(ssid, reason)
+            if not ssid then
+                return giveUp(reason)
+            end
+            if complete_callback then complete_callback() end
+            report("connected", { ssid = ssid })
+            if long_press then scanThenShowList() end -- the user asked for the list
         end)
     end
 
@@ -491,7 +514,7 @@ function M.install()
             return orig_restore(self)
         end
         start()
-        bringUp(function() connect(nil, false) end)
+        bringUp(function() connect(nil, false, true) end)
     end
 
     logger.info("WifiIndicator: non-blocking Wi-Fi connect engine installed")

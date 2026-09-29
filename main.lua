@@ -29,20 +29,22 @@ local Screen = Device.screen
 local wificonnect = require("wificonnect")
 wificonnect.install()
 
--- How long the corner icon shows a result (matches the timeout of the
--- popups it replaces).
-local ICON_TIMEOUT_S = 3
--- Safety net: a "connecting" icon stays up until the attempt reports back, but never
--- longer than this (the engine's worst case is about 75 s).
-local CONNECTING_MAX_S = 90
 -- Icon size, in unscaled pixels.
 local ICON_SIZE = 24
 -- Distance from the screen corner, in unscaled pixels.
 local ICON_MARGIN = 4
 
-local ICON_CONNECTED = "wifi.open.100"
-local ICON_CONNECTING = "wifi.open.50"
-local ICON_DISCONNECTED = "wifi.open.0"
+-- How each Wi-Fi state looks: its KOReader icon (menu bar and corner), and how many
+-- seconds the corner icon stays up (no `corner`: menu bar only). This is the one place
+-- to change the look. "connecting" stays up until the attempt reports back; its value
+-- is only a safety net (the engine's worst case is about 75 s).
+local LOOKS = {
+    off = { icon = "wifi.open.0", corner = 3 }, -- all waves faint
+    on = { icon = "wifi.open.25" }, -- Wi-Fi on, not connected: dot only
+    connecting = { icon = "wifi.open.50", corner = 90 },
+    connected = { icon = "wifi.open.100", corner = 3 },
+    problem = { icon = "notice-warning", corner = 5 }, -- warning triangle
+}
 
 -- Turn a (translated) message template into an anchored Lua pattern:
 -- escape pattern magic characters, and let the %1 placeholder match anything
@@ -60,10 +62,10 @@ local INTERCEPTED_MESSAGES = {
     { msg = _("Connecting to network %1…"), state = "connecting" }, -- NetworkMgr (Kindle)
     { msg = _("Connected to network %1"), state = "connected" }, -- NetworkMgr, NetworkSetting
     { msg = _("Scanning for networks…"), state = "connecting" }, -- NetworkMgr:reconnectOrShowNetworkMenu
-    { msg = _("Connection failed"), state = "failed" }, -- NetworkMgr:reconnectOrShowNetworkMenu
-    { msg = _("Error connecting to the network"), state = "failed" }, -- NetworkMgr
-    { msg = _("Unable to communicate with the Wi-Fi backend"), state = "failed" }, -- Kindle getNetworkList
-    { msg = _("Scanning for Wi-Fi networks timed out"), state = "failed" }, -- Kindle getNetworkList
+    { msg = _("Connection failed"), state = "problem" }, -- NetworkMgr:reconnectOrShowNetworkMenu
+    { msg = _("Error connecting to the network"), state = "problem" }, -- NetworkMgr
+    { msg = _("Unable to communicate with the Wi-Fi backend"), state = "problem" }, -- Kindle getNetworkList
+    { msg = _("Scanning for Wi-Fi networks timed out"), state = "problem" }, -- Kindle getNetworkList
     { msg = _("Connecting to Wi-Fi…"), state = "connecting" },
     { msg = _("Waiting for network connectivity…"), state = "connecting" },
     { msg = _("Turning on Wi-Fi…"), state = "connecting" },
@@ -116,22 +118,15 @@ showIcon = function(icon_name, timeout)
     UIManager:scheduleIn(timeout, hideIcon)
 end
 
--- Status presentation. Everything about how Wi-Fi status looks lives here: the engine
--- (wificonnect.lua), KOReader's Network events and the intercepted popups only report a
--- state. Unknown states (e.g. "idle") just hide the icon.
-local PRESENTATION = {
-    connecting = { icon = ICON_CONNECTING, timeout = CONNECTING_MAX_S },
-    connected = { icon = ICON_CONNECTED, timeout = ICON_TIMEOUT_S },
-    failed = { icon = ICON_DISCONNECTED, timeout = ICON_TIMEOUT_S },
-    off = { icon = ICON_DISCONNECTED, timeout = ICON_TIMEOUT_S },
-}
-
+-- Corner status. The engine (wificonnect.lua), KOReader's Network events and the
+-- intercepted popups only report a state; LOOKS decides what that looks like. States
+-- with no corner look (e.g. "choose", when the network list is up) hide the icon.
 local function presentStatus(state)
-    local look = PRESENTATION[state]
-    if not look or not G_reader_settings:nilOrTrue("wifiindicator_show_icon") then
+    local look = LOOKS[state]
+    if not (look and look.corner) or not G_reader_settings:nilOrTrue("wifiindicator_show_icon") then
         return hideIcon()
     end
-    showIcon(look.icon, look.timeout)
+    showIcon(look.icon, look.corner)
 end
 wificonnect.on_status = presentStatus
 
@@ -164,13 +159,23 @@ if not UIManager._wifiindicator_orig_show then
     end
 end
 
-local function wifiStateIcon()
+-- The menu bar's state: KOReader's live Wi-Fi state, plus what the engine is doing
+-- (only it knows about "connecting" and "problem").
+local function menuState()
     if NetworkMgr:isConnected() then
-        return ICON_CONNECTED
-    elseif NetworkMgr:isWifiOn() then
-        return ICON_CONNECTING
+        return "connected"
+    elseif wificonnect.state == "connecting" then
+        return "connecting" -- checked before isWifiOn: the radio is still off during bring-up
+    elseif not NetworkMgr:isWifiOn() then
+        return "off"
+    elseif wificonnect.state == "problem" then
+        return "problem"
     end
-    return ICON_DISCONNECTED
+    return "on"
+end
+
+local function wifiStateIcon()
+    return LOOKS[menuState()].icon
 end
 
 -- Wi-Fi status icon in the TouchMenu footer, left of the clock.
@@ -197,7 +202,7 @@ if not TouchMenu._wifiindicator_orig_init then
                 -- Optimistic state; the true state is re-read on the next
                 -- updateItems call or menu open.
                 local turning_on = not NetworkMgr:isWifiOn()
-                menu._wifiindicator_icon:setIcon(turning_on and ICON_CONNECTING or ICON_DISCONNECTED)
+                menu._wifiindicator_icon:setIcon(LOOKS[turning_on and "connecting" or "off"].icon)
                 UIManager:setDirty(menu.show_parent, "ui")
                 UIManager:broadcastEvent(Event:new("ToggleWifi"))
             end,
