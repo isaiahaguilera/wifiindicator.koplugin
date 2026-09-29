@@ -49,9 +49,9 @@ package.preload["ffi/blitbuffer"] = function() return { COLOR_WHITE = 0 } end
 package.preload["device"] = function()
     return {
         screen = { scaleBySize = function(_, n) return n end },
-        -- nbwifi.lua platform gate: neither SDL test mode nor a supported device,
-        -- so the bundled engine stays uninstalled under this harness.
-        isSDL = function() return false end,
+        -- nbwifi.lua platform gate: not a supported device (not Kindle, and the
+        -- NetworkMgr stub has no wpa_supplicant), so the bundled engine stays
+        -- uninstalled under this harness.
         isKindle = function() return false end,
     }
 end

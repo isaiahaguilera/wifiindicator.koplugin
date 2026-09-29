@@ -27,9 +27,6 @@ NetworkMgr._nbwifi_installed; whichever loads first wins (user patches load befo
 plugins, so the patch takes precedence when both are present).
 
 Returns { installed = <bool> } so main.lua knows whether to show the toggle.
-
-On the SDL emulator this installs a fake slow backend + instrumentation so the engine
-can be exercised in Docker (see NBWIFI_TEST harness at the bottom).
 ]]--
 
 local Device = require("device")
@@ -38,17 +35,11 @@ local logger = require("logger")
 
 local M = { installed = false }
 
-local TEST_MODE = Device:isSDL() and os.getenv("NBWIFI_TEST") == "1"
-
 if NetworkMgr._nbwifi_installed then
     M.installed = NetworkMgr._nbwifi_installed == "wifiindicator"
     if not M.installed then
         logger.info("WifiIndicator: non-blocking Wi-Fi connect already installed by",
             NetworkMgr._nbwifi_installed, "- not installing the bundled copy")
-        if TEST_MODE then
-            local f = io.open("/config/nbwifi-test.log", "a")
-            if f then f:write("PLUGIN_SKIPPED_ALREADY_INSTALLED\n") f:close() end
-        end
     end
     return M
 end
@@ -58,7 +49,7 @@ end
 -- wait loop in kindleScanThenGetResults (a C.usleep poll, up to 20s -- 40s with the
 -- empty-list rescan). We move the scan into a subprocess and keep the rest stock-like.
 local KINDLE_LIPC = Device:isKindle() and (pcall(require, "liblipclua"))
-if not TEST_MODE and not NetworkMgr.wpa_supplicant and not KINDLE_LIPC then
+if not NetworkMgr.wpa_supplicant and not KINDLE_LIPC then
     return M -- nothing to fix on other platforms
 end
 NetworkMgr._nbwifi_installed = "wifiindicator"
@@ -81,7 +72,7 @@ local POLL_INTERVAL = 0.25
 -- The user can flip this in the plugin menu; checked at each entry point, so it
 -- takes effect on the next connection attempt, no restart needed.
 local function enabled()
-    return TEST_MODE or G_reader_settings:nilOrTrue("wifiindicator_nonblocking_wifi")
+    return G_reader_settings:nilOrTrue("wifiindicator_nonblocking_wifi")
 end
 
 -- Any Wi-Fi teardown invalidates in-flight async steps.
@@ -219,7 +210,7 @@ local function pollUntil(check_fn, timeout_s, on_result)
     tick()
 end
 
--- Backend: the device-specific bits. Real wpa_supplicant on device, fakes on the emulator.
+-- Backend: the device-specific bits (wpa_supplicant or Kindle lipc).
 local backend = {}
 
 if NetworkMgr.wpa_supplicant then
@@ -295,50 +286,6 @@ elseif KINDLE_LIPC then
     -- No backend.calcPsk: Kindle profiles are matched by ESSID, no PSK derivation.
     -- No backend.obtainIP: DHCP is wifid's job.
     -- backend.getAssociated is never reached: getConfiguredNetworks() is nil on Kindle.
-end
-
--- Emulator fakes: same engine, simulated slow hardware. Tunable by the test harness.
-local fake_cfg = { enable_s = 5, scan_s = 2, assoc_delay_s = 6, dhcp_s = 3, auth_timeout_s = 20 }
-if TEST_MODE then
-    local assoc_started
-
-    -- Stand-in for the device turnOnWifi (Kobo & co): blocking enable script, then reconnect.
-    NetworkMgr.turnOnWifi = function(self, complete_callback, interactive)
-        ffiutil.usleep(fake_cfg.enable_s * 1e6) -- "enable-wifi.sh": blocks whoever runs it
-        -- enable-wifi.sh ends with `wpa_supplicant ... -B`: a daemon that inherits
-        -- every non-CLOEXEC fd of ours (the script's fd-hygiene loop skips pipes)
-        -- and never exits. Model it with a backgrounded sleep.
-        os.execute("(sleep 120 >/dev/null 2>&1 &)")
-        return self:reconnectOrShowNetworkMenu(complete_callback, interactive)
-    end
-
-    backend.calcPsk = function() return "00" end
-    backend.authSetup = function()
-        assoc_started = time.monotonic()
-        return 1
-    end
-    backend.getAssociated = function()
-        if fake_cfg.assoc_delay_s < 0 then return nil end -- simulates an AP we never join
-        if assoc_started and time.monotonic() > assoc_started + time.s(fake_cfg.assoc_delay_s) then
-            return { id = 1, ssid = "TestAP" }
-        end
-    end
-    backend.authCleanup = function() end
-    backend.obtainIP = function()
-        -- The foreground sleep is the DHCP lease wait; the backgrounded one models
-        -- obtain-ip.sh's dhcpcd daemonizing with our pipe write end still open.
-        os.execute("sleep " .. tostring(fake_cfg.dhcp_s) .. "; (sleep 120 >/dev/null 2>&1 &)")
-    end
-
-    NetworkMgr.getNetworkList = function()
-        ffiutil.usleep(fake_cfg.scan_s * 1e6) -- "slow scan": blocks the *subprocess* only
-        return {
-            { ssid = "TestAP", signal_quality = 80, flags = "[WPA2-PSK-CCMP][ESS]", password = "secret", psk = "00" },
-            { ssid = "Neighbor", signal_quality = 40, flags = "[WPA2-PSK-CCMP][ESS]" },
-        }
-    end
-    NetworkMgr.getConfiguredNetworks = function() return {} end
-    NetworkMgr.saveNetwork = function() end
 end
 
 local AUTH_TIMEOUT_S = 30 -- stock waits up to ~30 x 1s events; restore-wifi-async.sh uses 15s
@@ -456,8 +403,7 @@ function NetworkMgr:reconnectOrShowNetworkMenu(complete_callback, interactive)
             -- success immediately and defers to the connectivity check. Same here.
             return obtainIPThenFinish(network.ssid, network)
         end
-        local timeout = TEST_MODE and fake_cfg.auth_timeout_s or AUTH_TIMEOUT_S
-        pollUntil(function() return backend.getAssociated(self) end, timeout, function(nw)
+        pollUntil(function() return backend.getAssociated(self) end, AUTH_TIMEOUT_S, function(nw)
             if gen ~= my_gen then return end
             if nw then
                 network.wpa_supplicant_id = nw.id or nw_id
@@ -510,7 +456,7 @@ end
 -- wifid's async business), and stock turnOnWifi chains into our reconnect by itself.
 local ENABLE_TIMEOUT_S = 30
 
-if NetworkMgr.wpa_supplicant or TEST_MODE then
+if NetworkMgr.wpa_supplicant then
     local orig_turnOnWifi = NetworkMgr.turnOnWifi
     function NetworkMgr:turnOnWifi(complete_callback, interactive)
         if not enabled() then
@@ -538,64 +484,5 @@ if NetworkMgr.wpa_supplicant or TEST_MODE then
 end
 
 logger.info("WifiIndicator: non-blocking Wi-Fi connect engine installed")
-
--- ---------------------------------------------------------------------------
--- Emulator test harness (Docker): heartbeat + a success run and a failure run.
--- ---------------------------------------------------------------------------
-if TEST_MODE then
-    local LOG_PATH = "/config/nbwifi-test.log"
-    os.remove(LOG_PATH)
-    local function tlog(msg)
-        local f = io.open(LOG_PATH, "a")
-        if f then
-            f:write(string.format("%.3f %s\n", time.to_s(time.monotonic()), msg))
-            f:close()
-        end
-        logger.info("nbwifi-test:", msg)
-    end
-
-    -- Detect abort (failure path) for the log
-    local orig_abort = NetworkMgr._abortWifiConnection
-    NetworkMgr._abortWifiConnection = function(self, ...)
-        tlog("ABORT_WIFI_CONNECTION")
-        return orig_abort(self, ...)
-    end
-
-    local function heartbeat()
-        tlog("HB")
-        UIManager:scheduleIn(0.1, heartbeat)
-    end
-
-    tlog("PATCH_LOADED")
-    UIManager:scheduleIn(1, heartbeat)
-
-    -- Run 1: success. enable 5s -> scan 2s -> associate after 6s -> DHCP 3s => callback + "Connected"
-    -- Goes through the full turnOnWifi wrapper, so the blocking fake enable step is covered too.
-    UIManager:scheduleIn(5, function()
-        tlog("RUN1_START (success path)")
-        NetworkMgr:turnOnWifi(function() tlog("RUN1_COMPLETE_CALLBACK") end, false)
-    end)
-
-    -- Run 2: failure. enable 5s, then AP never associates, 5s auth timeout => abort, no callback
-    UIManager:scheduleIn(32, function()
-        fake_cfg.assoc_delay_s = -1
-        fake_cfg.auth_timeout_s = 5
-        tlog("RUN2_START (failure path)")
-        NetworkMgr:turnOnWifi(function() tlog("RUN2_COMPLETE_CALLBACK_SHOULD_NOT_HAPPEN") end, false)
-    end)
-
-    -- Run 3: Kindle-style backend. Scan in subprocess, auth kicks off the daemon and
-    -- succeeds immediately (async_auth), no PSK derivation, no DHCP step => callback.
-    UIManager:scheduleIn(48, function()
-        backend.async_auth = true
-        backend.calcPsk = nil
-        backend.obtainIP = nil
-        backend.authSetup = function() return 0 end
-        tlog("RUN3_START (kindle path)")
-        NetworkMgr:reconnectOrShowNetworkMenu(function() tlog("RUN3_COMPLETE_CALLBACK") end, false)
-    end)
-
-    UIManager:scheduleIn(60, function() tlog("TEST_DONE") end)
-end
 
 return M
