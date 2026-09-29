@@ -20,7 +20,7 @@ function UIManager:unschedule(fn)
     end
 end
 function UIManager:show(w) table.insert(self.shown, w) end
-function UIManager:close() end
+function UIManager:close(w) self.closed = self.closed or {}; table.insert(self.closed, w) end
 local function run(max_s)
     local stop = now + (max_s or 120)
     while #queue > 0 do
@@ -140,6 +140,13 @@ function NetworkMgr:_abortWifiConnection() table.insert(calls, "abort") end
 function NetworkMgr:getAllSavedNetworks() return { data = saved_data } end
 function NetworkMgr:saveNetwork(nw) table.insert(calls, "save " .. nw.ssid) end
 function NetworkMgr:obtainIP() table.insert(calls, "obtainIP") end
+local wifi_on = false
+function NetworkMgr:isWifiOn() return wifi_on end
+function NetworkMgr:toggleWifiOn(cb, long_press, interactive)
+    table.insert(calls, "toggleWifiOn " .. tostring(long_press) .. " " .. tostring(interactive))
+end
+function NetworkMgr:scheduleConnectivityCheck() table.insert(calls, "connectivity check") end
+function NetworkMgr:unscheduleConnectivityCheck() end
 function NetworkMgr:getNetworkList()
     local list = {}
     for ssid in pairs(wpa.in_range) do table.insert(list, { ssid = ssid, signal_quality = 50 }) end
@@ -391,6 +398,41 @@ check(has(wpa.commands, "REMOVE 0") and has(wpa.commands, "ENABLE all"),
     "J: failure removes the network and undoes SELECT_NETWORK")
 check(statuses[#statuses] == "problem" and UIManager.shown[#UIManager.shown].text == "Timed out",
     "J: failure reports a problem and tells the user in the list")
+
+-- L: "Show network list" menu action
+scenario{ in_range = {} }
+UIManager.closed = {}
+wifi_on = true
+NetworkMgr.getNetworkList = function()
+    return { { ssid = "Home", bssid = "h:5", signal_quality = 70 }, { ssid = "Home", bssid = "h:2", signal_quality = 50 } }
+end
+M.showNetworkList()
+local looking = UIManager.shown[1]
+check(looking and looking.text == "Looking for networks…" and looking.timeout,
+    "L: Wi-Fi on -> a 'Looking for networks…' note right away (with a safety timeout)")
+run()
+local shown_list = UIManager.shown[2]
+check(shown_list and shown_list.network_list and #shown_list.network_list == 1,
+    "L: fresh scan, then the list (duplicates merged)")
+check(has(UIManager.closed, looking), "L: the note closes when the list appears")
+shown_list.connect_callback()
+check(has(calls, "connectivity check") and not has(calls, "abort"),
+    "L: joining from that list lets KOReader confirm and broadcast the connection")
+
+scenario{ in_range = {} }
+UIManager.closed = {}
+fail_spawn_at = 1
+M.showNetworkList()
+run()
+fail_spawn_at = nil
+check(statuses[#statuses] == "problem" and not has(calls, "abort") and has(UIManager.closed, UIManager.shown[1]),
+    "L: scan failure -> problem icon, note closed, Wi-Fi left as it was")
+
+scenario{ in_range = {} }
+wifi_on = false
+M.showNetworkList()
+check(has(calls, "toggleWifiOn true true") and #UIManager.shown == 0,
+    "L: Wi-Fi off -> turns it on like a long-press (connect, then the list)")
 
 print(failures == 0 and "ALL TESTS PASSED" or (failures .. " TEST(S) FAILED"))
 os.exit(failures == 0 and 0 or 1)

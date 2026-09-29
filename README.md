@@ -49,8 +49,14 @@ the Kobo picks the radio itself.
   reconnect on their own just like networks joined in the Kobo OS. No-op on
   other platforms.
 
-All behaviors can be switched off individually under
-**Menu → Network → Wi-Fi status icon**.
+Everything lives under **Menu → Network → Wi-Fi status & connect**:
+
+- **Show network list** — scans for networks now and shows the list, e.g. to
+  switch networks (turns Wi-Fi on first if it's off).
+- **Connect in the background** — the non-blocking engine; off means
+  KOReader's standard (freezing) connect.
+- **Hide Wi-Fi popups** — the popup filter; independent of the icons.
+- **Show Wi-Fi status in corner** / **in menu bar** — the two status icons.
 
 ## Install
 

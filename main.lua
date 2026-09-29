@@ -233,50 +233,33 @@ function WifiIndicator:init()
     self.ui.menu:registerToMainMenu(self)
 end
 
-function WifiIndicator:addToMainMenu(menu_items)
-    local sub_item_table = {
-        {
-            text = _("Replace Wi-Fi popups with a corner icon"),
-            checked_func = function()
-                return G_reader_settings:nilOrTrue("wifiindicator_suppress_popups")
-            end,
-            callback = function()
-                G_reader_settings:flipNilOrTrue("wifiindicator_suppress_popups")
-            end,
-        },
-        {
-            text = _("Show icon on connect and disconnect"),
-            checked_func = function()
-                return G_reader_settings:nilOrTrue("wifiindicator_show_icon")
-            end,
-            callback = function()
-                G_reader_settings:flipNilOrTrue("wifiindicator_show_icon")
-            end,
-        },
-        {
-            text = _("Show Wi-Fi status in menu bar"),
-            checked_func = function()
-                return G_reader_settings:nilOrTrue("wifiindicator_menu_icon")
-            end,
-            callback = function()
-                G_reader_settings:flipNilOrTrue("wifiindicator_menu_icon")
-            end,
-        },
+-- A checkbox bound to a default-on setting.
+local function settingItem(text, key, help_text)
+    return {
+        text = text,
+        help_text = help_text,
+        checked_func = function() return G_reader_settings:nilOrTrue(key) end,
+        callback = function() G_reader_settings:flipNilOrTrue(key) end,
     }
+end
+
+function WifiIndicator:addToMainMenu(menu_items)
+    local sub_item_table = {}
     if wificonnect.installed then
         table.insert(sub_item_table, {
-            text = _("Non-blocking Wi-Fi connect"),
-            help_text = _("Connect to Wi-Fi in the background instead of freezing the interface. Takes effect on the next connection attempt."),
-            checked_func = function()
-                return G_reader_settings:nilOrTrue("wifiindicator_nonblocking_wifi")
-            end,
-            callback = function()
-                G_reader_settings:flipNilOrTrue("wifiindicator_nonblocking_wifi")
-            end,
+            text = _("Show network list"),
+            help_text = _("Scan for networks now and show the list, e.g. to switch networks. Turns Wi-Fi on first if it's off."),
+            callback = function() wificonnect.showNetworkList() end,
+            separator = true,
         })
+        table.insert(sub_item_table, settingItem(_("Connect in the background"), "wifiindicator_nonblocking_wifi",
+            _("Keep reading while Wi-Fi connects, and reconnect after sleep to networks saved in KOReader. When off, KOReader connects the standard way and the screen freezes while it does. Takes effect on the next connection.")))
     end
+    table.insert(sub_item_table, settingItem(_("Hide Wi-Fi popups"), "wifiindicator_suppress_popups"))
+    table.insert(sub_item_table, settingItem(_("Show Wi-Fi status in corner"), "wifiindicator_show_icon"))
+    table.insert(sub_item_table, settingItem(_("Show Wi-Fi status in menu bar"), "wifiindicator_menu_icon"))
     menu_items.wifi_indicator = {
-        text = _("Wi-Fi status icon"),
+        text = _("Wi-Fi status & connect"),
         sorting_hint = "network",
         sub_item_table = sub_item_table,
     }

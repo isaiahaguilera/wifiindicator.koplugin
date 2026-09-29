@@ -233,8 +233,24 @@ check(menu_tap2._wifiindicator_icon.icon == "wifi.open.0",
 local menu_items = {}
 WifiIndicator.addToMainMenu(WifiIndicator, menu_items)
 local sub = menu_items.wifi_indicator.sub_item_table
-check(#sub == 3, "settings: three checkboxes in plugin menu")
+check(menu_items.wifi_indicator.text == "Wi-Fi status & connect", "settings: menu is named 'Wi-Fi status & connect'")
+check(#sub == 3, "settings: engine not installed -> no network list or background toggle, three checkboxes")
+check(sub[1].text == "Hide Wi-Fi popups" and sub[2].text == "Show Wi-Fi status in corner"
+    and sub[3].text == "Show Wi-Fi status in menu bar", "settings: checkbox labels and order")
 check(sub[3].checked_func() == true, "settings: menu icon default on")
+
+wificonnect.installed = true -- as on a Kobo
+local list_calls = 0
+wificonnect.showNetworkList = function() list_calls = list_calls + 1 end
+menu_items = {}
+WifiIndicator.addToMainMenu(WifiIndicator, menu_items)
+sub = menu_items.wifi_indicator.sub_item_table
+check(#sub == 5 and sub[1].text == "Show network list" and sub[1].separator
+    and sub[2].text == "Connect in the background",
+    "settings: engine installed -> 'Show network list' on top, then 'Connect in the background'")
+sub[1].callback()
+check(list_calls == 1 and sub[1].checked_func == nil, "settings: 'Show network list' is an action, not a checkbox")
+wificonnect.installed, wificonnect.showNetworkList = false, nil
 
 -- ---------------------------------------------- delete plugin settings --
 local deleted = {}

@@ -459,10 +459,14 @@ function M.install()
     end
 
     -- Scan in a subprocess, then show the stock network list.
-    local function scanThenShowList(connect_callback)
+    -- keep_wifi: a failed scan only reports a problem, it doesn't tear Wi-Fi down.
+    -- on_scanned: called once the scan is over, whatever the outcome.
+    local function scanThenShowList(connect_callback, keep_wifi, on_scanned)
         local function show(ok, list)
+            if on_scanned then on_scanned() end
             if not ok or not list then
                 report("problem")
+                if keep_wifi then return end
                 return NetworkMgr:_abortWifiConnection()
             end
             local NetworkSetting = require("ui/widget/networksetting")
@@ -547,6 +551,28 @@ function M.install()
         end
         start()
         bringUp(function() connect(nil, false, true) end)
+    end
+
+    -- Menu action: a fresh scan, then the network list (e.g. to switch networks).
+    -- With Wi-Fi off, turn it on like a long-press on "Wi-Fi connection" does: connect,
+    -- then show the list.
+    function M.showNetworkList()
+        if not NetworkMgr:isWifiOn() then
+            return NetworkMgr:toggleWifiOn(nil, true, true)
+        end
+        -- The user asked for the list: a short "looking" note is feedback, not noise.
+        -- (Its own wording, so main.lua's popup filter leaves it alone.)
+        -- The timeout is a safety net: a cancelled scan (Wi-Fi turned off) never reports back.
+        local info = InfoMessage:new{ text = _("Looking for networks…"), timeout = 2 * SCAN_TIMEOUT_S }
+        UIManager:show(info)
+        scanThenShowList(function()
+            -- A network was joined from the list: let KOReader confirm it and broadcast
+            -- NetworkConnected, like enableWifi does.
+            if NetworkMgr.pending_connectivity_check then
+                NetworkMgr:unscheduleConnectivityCheck()
+            end
+            NetworkMgr:scheduleConnectivityCheck()
+        end, true, function() UIManager:close(info) end)
     end
 
     logger.info("WifiIndicator: non-blocking Wi-Fi connect engine installed")
