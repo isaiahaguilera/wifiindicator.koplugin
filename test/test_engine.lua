@@ -202,6 +202,12 @@ function NetworkSetting.init(self)
     self.items = {}
     for _, nw in ipairs(self.network_list) do
         table.insert(self.items, setmetatable({ info = nw, setting_ui = self }, NetworkItem))
+        if nw.connected then self.connected_item = self.items[#self.items] end
+    end
+    -- Like the real init: with a connect_callback and an already-connected network, it assumes
+    -- a reconnect "missed it", re-runs DHCP on the UI thread and closes the list (legacy path).
+    if self.connect_callback and self.connected_item then
+        table.insert(calls, "legacy re-DHCP")
     end
 end
 function NetworkSetting:new(o)
@@ -403,8 +409,9 @@ check(statuses[#statuses] == "problem" and UIManager.shown[#UIManager.shown].tex
 scenario{ in_range = {} }
 UIManager.closed = {}
 wifi_on = true
-NetworkMgr.getNetworkList = function()
-    return { { ssid = "Home", bssid = "h:5", signal_quality = 70 }, { ssid = "Home", bssid = "h:2", signal_quality = 50 } }
+NetworkMgr.getNetworkList = function() -- already connected to Home
+    return { { ssid = "Home", bssid = "h:5", signal_quality = 70, connected = true },
+             { ssid = "Home", bssid = "h:2", signal_quality = 50 } }
 end
 M.showNetworkList()
 local looking = UIManager.shown[1]
@@ -415,6 +422,8 @@ local shown_list = UIManager.shown[2]
 check(shown_list and shown_list.network_list and #shown_list.network_list == 1,
     "L: fresh scan, then the list (duplicates merged)")
 check(has(UIManager.closed, looking), "L: the note closes when the list appears")
+check(not has(calls, "legacy re-DHCP") and not has(UIManager.closed, shown_list),
+    "L: already connected -> no 'Obtaining IP address…' re-DHCP, and the list stays open")
 shown_list.connect_callback()
 check(has(calls, "connectivity check") and not has(calls, "abort"),
     "L: joining from that list lets KOReader confirm and broadcast the connection")

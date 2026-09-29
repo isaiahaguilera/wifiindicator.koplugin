@@ -471,10 +471,12 @@ function M.install()
             end
             local NetworkSetting = require("ui/widget/networksetting")
             patchNetworkList(NetworkSetting)
-            UIManager:show(NetworkSetting:new{
-                network_list = M.mergeBySSID(list),
-                connect_callback = connect_callback,
-            })
+            local list_widget = NetworkSetting:new{ network_list = M.mergeBySSID(list) }
+            -- Set after construction: NetworkSetting:init() treats a connect_callback plus an
+            -- already-connected network as "the reconnect missed it", re-runs DHCP on the UI
+            -- thread ("Obtaining IP address…") and closes the list. Taps still use it.
+            list_widget.connect_callback = connect_callback
+            UIManager:show(list_widget)
         end
         local function scan(on_scan)
             subprocessCall(function() return NetworkMgr:getNetworkList() end, SCAN_TIMEOUT_S, on_scan)
