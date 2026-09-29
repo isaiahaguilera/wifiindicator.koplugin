@@ -72,9 +72,6 @@ package.preload["gettext"] = function() return identity_gettext end
 package.preload["ui/event"] = function()
     return { new = function(_, name) return { name = name } end }
 end
-package.preload["ui/widget/horizontalspan"] = function()
-    return { new = function(_, o) o = o or {}; o.is_span = true; return o end }
-end
 package.preload["ui/widget/iconbutton"] = function()
     local IconButton = {}
     IconButton.__index = IconButton
@@ -143,10 +140,12 @@ wifi.on, wifi.connected = true, true
 local menu = newMenu()
 check(menu.device_info[1] ~= nil and menu.device_info[1].is_icon_button == true,
     "menu icon: IconButton injected at head of device_info")
-check(menu.device_info[2] ~= nil and menu.device_info[2].is_span == true,
-    "menu icon: span between icon and time")
-check(menu.device_info[3] == menu.time_info,
-    "menu icon: time_info still present after icon")
+check(menu.device_info[2] == menu.time_info,
+    "menu icon: time_info right after the icon (the icon's padding is the gap)")
+local btn = menu.device_info[1]
+check(btn.width == 20 and btn.padding_top == 10 and btn.padding_bottom == 10
+    and btn.padding_left == 10 and btn.padding_right == 10,
+    "menu icon: 20 px icon padded to a 40 px tap target (the footer's up-button size)")
 check(menu._wifiindicator_icon == menu.device_info[1],
     "menu icon: icon reachable as menu._wifiindicator_icon")
 check(menu.device_info[1].icon == "wifi.open.100",

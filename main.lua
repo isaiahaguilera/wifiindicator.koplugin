@@ -12,7 +12,6 @@ screen instead.
 local Device = require("device")
 local Event = require("ui/event")
 local FrameContainer = require("ui/widget/container/framecontainer")
-local HorizontalSpan = require("ui/widget/horizontalspan")
 local IconButton = require("ui/widget/iconbutton")
 local IconWidget = require("ui/widget/iconwidget")
 local NetworkMgr = require("ui/network/manager")
@@ -33,6 +32,9 @@ wificonnect.install()
 local ICON_SIZE = 24
 -- Distance from the screen corner, in unscaled pixels.
 local ICON_MARGIN = 4
+-- Menu-bar icon tap target, in unscaled pixels: the size of the menu footer's own "up"
+-- button (DGENERIC_ICON_SIZE), which sets the footer's height.
+local MENU_TAP_TARGET = 40
 
 -- How each Wi-Fi state looks: its KOReader icon (menu bar and corner), and how many
 -- seconds the corner icon stays up (no `corner`: menu bar only). This is the one place
@@ -219,10 +221,18 @@ if not TouchMenu._wifiindicator_orig_init then
             return
         end
         local icon_size = Screen:scaleBySize(menu.fface and menu.fface.orig_size or 20)
+        -- Invisible padding makes the small icon as easy to hit as the footer's "up" button.
+        -- The footer is already that tall, so nothing moves vertically; the right padding
+        -- doubles as the gap before the clock.
+        local pad = math.max(0, math.floor((Screen:scaleBySize(MENU_TAP_TARGET) - icon_size) / 2))
         menu._wifiindicator_icon = IconButton:new{
             icon = wifiStateIcon(),
             width = icon_size,
             height = icon_size,
+            padding_top = pad,
+            padding_bottom = pad,
+            padding_left = pad,
+            padding_right = math.max(pad, Size.span.horizontal_default),
             show_parent = menu.show_parent,
             callback = function()
                 -- Optimistic state; the true state is re-read on the next
@@ -233,7 +243,6 @@ if not TouchMenu._wifiindicator_orig_init then
                 UIManager:broadcastEvent(Event:new("ToggleWifi"))
             end,
         }
-        table.insert(menu.device_info, 1, HorizontalSpan:new{ width = Size.span.horizontal_default })
         table.insert(menu.device_info, 1, menu._wifiindicator_icon)
         menu.device_info:resetLayout()
         last_menu[1] = menu
