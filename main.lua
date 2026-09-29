@@ -118,17 +118,25 @@ showIcon = function(icon_name, timeout)
     UIManager:scheduleIn(timeout, hideIcon)
 end
 
--- Corner status. The engine (wificonnect.lua), KOReader's Network events and the
+local refreshMenuIcon -- defined with the menu bar icon below
+
+-- Status changes. The engine (wificonnect.lua), KOReader's Network events and the
 -- intercepted popups only report a state; LOOKS decides what that looks like. States
--- with no corner look (e.g. "choose", when the network list is up) hide the icon.
+-- with no corner look (e.g. "choose", when the network list is up) hide the corner icon.
+-- An open menu's icon is refreshed too.
 local function presentStatus(state)
+    refreshMenuIcon()
     local look = LOOKS[state]
     if not (look and look.corner) or not G_reader_settings:nilOrTrue("wifiindicator_show_icon") then
         return hideIcon()
     end
     showIcon(look.icon, look.corner)
 end
-wificonnect.on_status = presentStatus
+-- First load wins, like the patches below: they share its module-level state.
+if not wificonnect._wifiindicator_wired then
+    wificonnect._wifiindicator_wired = true
+    wificonnect.on_status = presentStatus
+end
 
 local function interceptedIcon(widget)
     if not widget or type(widget.text) ~= "string" then
@@ -178,6 +186,24 @@ local function wifiStateIcon()
     return LOOKS[menuState()].icon
 end
 
+-- The last menu that got our icon. Weak, so a closed menu can be collected.
+local last_menu = setmetatable({}, { __mode = "v" })
+
+-- Keep the menu bar icon current while the menu stays open (otherwise it would only
+-- update on the next updateItems or menu open).
+refreshMenuIcon = function()
+    local menu = last_menu[1]
+    local button = menu and menu._wifiindicator_icon
+    if not button or not UIManager:isWidgetShown(menu.show_parent) then
+        return
+    end
+    local icon = wifiStateIcon()
+    if button.icon ~= icon then
+        button:setIcon(icon)
+        UIManager:setDirty(menu.show_parent, "ui", button.dimen)
+    end
+end
+
 -- Wi-Fi status icon in the TouchMenu footer, left of the clock.
 -- The menu is rebuilt on every open, so the setting takes effect on the
 -- next open, and state is never stale.
@@ -210,6 +236,7 @@ if not TouchMenu._wifiindicator_orig_init then
         table.insert(menu.device_info, 1, HorizontalSpan:new{ width = Size.span.horizontal_default })
         table.insert(menu.device_info, 1, menu._wifiindicator_icon)
         menu.device_info:resetLayout()
+        last_menu[1] = menu
     end
 end
 

@@ -15,6 +15,7 @@ local UIManager = {
     close = function() end,
     setDirty = function() end,
     broadcastEvent = function(self, ev) table.insert(broadcasts, ev.name) end,
+    isWidgetShown = function(self, w) return w.is_shown == true end,
 }
 UIManager.show = function(self, widget, ...)
     table.insert(shown, widget)
@@ -203,6 +204,31 @@ local menu_state_off = newMenu()
 local ok_no_icon = pcall(FakeTouchMenu.updateItems, menu_state_off)
 check(ok_no_icon, "menu icon: updateItems is a no-op without injected icon")
 settings_data.wifiindicator_menu_icon = nil
+
+-- ------------------------------------------------ menu icon: live refresh --
+local dirty = 0
+UIManager.setDirty = function() dirty = dirty + 1 end
+wifi.on, wifi.connected = false, false
+local live = newMenu()
+live.is_shown = true
+wificonnect.state = "connecting" -- the engine reports the state before notifying
+wificonnect.on_status("connecting")
+check(live._wifiindicator_icon.icon == "wifi.open.50" and dirty == 1,
+    "menu icon: follows a status change while the menu is open")
+wifi.on, wifi.connected = true, true
+wificonnect.state = "connected"
+wificonnect.on_status("connected")
+check(live._wifiindicator_icon.icon == "wifi.open.100" and dirty == 2,
+    "menu icon: switches to connected without reopening the menu")
+wificonnect.on_status("connected")
+check(dirty == 2, "menu icon: unchanged state -> no extra redraw")
+live.is_shown = false
+wifi.on, wifi.connected = false, false
+WifiIndicator.onNetworkDisconnected(WifiIndicator)
+check(live._wifiindicator_icon.icon == "wifi.open.100" and dirty == 2,
+    "menu icon: a closed menu is left alone")
+wificonnect.state = nil
+UIManager.setDirty = function() end
 
 -- ------------------------------------------------------ menu icon: tap --
 local function clearBroadcasts()
