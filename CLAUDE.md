@@ -73,6 +73,7 @@ _Last updated: 2026-09-28_
   - Upstream has release **v1.0.0** (`wifiindicator.koplugin.zip`, the old nbwifi version).
 
   **Why:** accepting a Storefront "update" could replace this fork with upstream v1.0.0. **How to apply:** the release setup is live (v2.0.0, released 2026-09-29). Have the user link the plugin to isaiahaguilera/wifistatus.koplugin in Storefront, and warn if an old `wifiindicator.koplugin` install auto-matches upstream; a release setup needs a `_meta.lua` version above 1.0.0, one `*koplugin*.zip` attachment per release, and ideally a non-colliding folder name.
+- `[feedback, 2026-09-30]` **README style.** The user wants the README clear, concise and easy to follow, not reading like an AI context doc. **Why:** it's the public face of the plugin (listed in Storefront next to the original), read by KOReader users. **How to apply:** user-facing sections first (credit, why, features, icons, settings, install, updating, compatibility, then development and license), in short plain sentences; internals and history go in `docs/` or this file. Keep the "Based on … asxelot" credit at the top.
 - `[feedback, 2026-09-28]` Mirror every project memory into this file and keep it working as a handoff doc (see *Rules for Claude*). **Why:** the user wants any future LLM session to recover the full context from the repo alone, with no prior memory. **How to apply:** after any memory write, update this section; before stopping, update *Current state*, *Open threads* and *Session log*.
 
 ## Session log
