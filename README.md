@@ -1,5 +1,12 @@
 # Wi-Fi status & connect — a KOReader plugin for Kobo
 
+> **Based on [wifiindicator.koplugin](https://github.com/asxelot/wifiindicator.koplugin)
+> and [koreader-nonblocking-wifi](https://github.com/asxelot/koreader-nonblocking-wifi)
+> by Eugene Ryzhkov ([asxelot](https://github.com/asxelot)).** This is a
+> modified version, maintained separately since September 2026: the connect
+> engine was rewritten and the plugin renamed. The original commits are kept in
+> this repo's history. Licensed GPL-3.0, like the original.
+
 Stock KOReader on Kobo freezes the screen while Wi-Fi connects (5 seconds or
 more, longer when no known network is around), covers your page with popups
 at every step, and only reconnects on its own to networks the Kobo OS already
@@ -123,7 +130,7 @@ checks the tag matches `_meta.lua`, and publishes the release with
 
 ## Credits & license
 
-A personal fork of [asxelot/wifiindicator.koplugin](https://github.com/asxelot/wifiindicator.koplugin)
+Started as a fork of [asxelot/wifiindicator.koplugin](https://github.com/asxelot/wifiindicator.koplugin)
 by Eugene Ryzhkov. The connect engine grew out of their
 [koreader-nonblocking-wifi](https://github.com/asxelot/koreader-nonblocking-wifi)
 user patch and keeps its background-process machinery. If that patch is
