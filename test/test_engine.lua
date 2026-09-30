@@ -236,9 +236,18 @@ package.preload["ui/time"] = function()
     return { monotonic = function() return now end, s = function(s) return s end }
 end
 package.preload["gettext"] = function() return function(s) return s end end
+local is_kobo = false
+package.preload["device"] = function() return { isKobo = function() return is_kobo end } end
 package.preload["ui/widget/networksetting"] = function() return NetworkSetting end
 
 -- ------------------------------------------------------------------ harness --
+-- A non-Kobo wpa_supplicant device (Cervantes, reMarkable, Sony PRS) keeps stock connecting.
+local stock_turnOnWifi = NetworkMgr.turnOnWifi
+local M_other = assert(loadfile("wificonnect.lua"))()
+local installed_elsewhere = M_other.install()
+local untouched_elsewhere = NetworkMgr.turnOnWifi == stock_turnOnWifi and NetworkMgr._nbwifi_installed == nil
+
+is_kobo = true
 local M = assert(loadfile("wificonnect.lua"))()
 local statuses
 M.on_status = function(state) table.insert(statuses, state) end
@@ -264,7 +273,9 @@ local function scenario(opts)
     NetworkMgr.wifi_toggle_long_press = opts.long_press
 end
 
-check(installed and M.installed, "install: engine installs on a wpa_supplicant device")
+check(installed_elsewhere == false and not M_other.installed and untouched_elsewhere,
+    "install: a non-Kobo wpa_supplicant device keeps stock connecting (nothing hooked)")
+check(installed and M.installed, "install: engine installs on a Kobo")
 check(M.install() == true, "install: second call is a no-op that still reports installed")
 
 -- A: menu toggle, network known only to KOReader

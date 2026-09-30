@@ -132,8 +132,10 @@ function M.install()
         M.installed = NetworkMgr._nbwifi_installed == "wifiindicator"
         return M.installed
     end
-    if not NetworkMgr.wpa_supplicant then
-        return false -- not a wpa_supplicant device: nothing to do
+    -- Kobo only: it's the only platform this was tested on. Cervantes, reMarkable and Sony
+    -- PRS also use wpa_supplicant, but they keep stock connecting until someone tests there.
+    if not NetworkMgr.wpa_supplicant or not require("device"):isKobo() then
+        return false
     end
     NetworkMgr._nbwifi_installed = "wifiindicator"
     M.installed = true
