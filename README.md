@@ -1,140 +1,111 @@
-# Wi-Fi status & connect — a KOReader plugin for Kobo
+# Wi-Fi status & connect
 
-> **Based on [wifiindicator.koplugin](https://github.com/asxelot/wifiindicator.koplugin)
-> and [koreader-nonblocking-wifi](https://github.com/asxelot/koreader-nonblocking-wifi)
-> by Eugene Ryzhkov ([asxelot](https://github.com/asxelot)).** This is a
-> modified version, maintained separately since September 2026: the connect
-> engine was rewritten and the plugin renamed. The original commits are kept in
-> this repo's history. Licensed GPL-3.0, like the original.
+A KOReader plugin for Kobo that keeps Wi-Fi out of your way while you read.
 
-Stock KOReader on Kobo freezes the screen while Wi-Fi connects (5 seconds or
-more, longer when no known network is around), covers your page with popups
-at every step, and only reconnects on its own to networks the Kobo OS already
-knows. This plugin fixes all three: Wi-Fi connects in the background, the
-popups are replaced by a small status icon, and networks you saved in
-KOReader reconnect just like the Kobo's own.
+Based on [wifiindicator.koplugin](https://github.com/asxelot/wifiindicator.koplugin)
+and [koreader-nonblocking-wifi](https://github.com/asxelot/koreader-nonblocking-wifi)
+by Eugene Ryzhkov ([asxelot](https://github.com/asxelot)). This is a modified
+version, maintained separately since September 2026.
 
-Tested on a **Kobo Clara BW** with **KOReader v2026.07.1**.
+## Why
 
-## What it does
+Out of the box, KOReader on Kobo:
 
-- **Connects in the background.** Turning Wi-Fi on, actions that need the
-  network (sync, OPDS…), reconnecting after sleep, and joining from the
-  network list all happen without freezing the screen.
-- **Reconnects to your KOReader networks.** Networks saved in KOReader come
-  back after sleep, even if you never joined them in the Kobo OS.
-- **Hides Wi-Fi popups.** "Turning on Wi-Fi…", "Connecting…", "Wi-Fi off."
-  and the rest are replaced by the status icon.
-- **Shows Wi-Fi status** as a small icon in the top-left corner and in the
-  menu's bottom bar. Tap the menu-bar icon to turn Wi-Fi on or off.
-- **Cleans up the network list.** A network broadcast by several radios (a
-  dual-band 2.4/5 GHz router, or a mesh) is listed once. Connecting is by
-  name; the Kobo picks the radio.
+- freezes the screen while Wi-Fi connects (5 seconds or more on a Clara BW),
+- shows a popup at every step of connecting, and
+- only reconnects on its own to networks the Kobo itself knows.
 
-### What the icons mean
+This plugin fixes all three.
 
-KOReader's built-in icons, one per state, in both places:
+## Features
 
-| Icon | Meaning | Corner icon |
-|---|---|---|
-| all waves faint | Wi-Fi off | 3 s |
-| dot only | Wi-Fi on, not connected | — (menu bar only) |
-| half the waves | connecting | until it finishes |
-| full | connected | 3 s |
-| warning triangle | something went wrong | 5 s |
+- **No freezing.** Wi-Fi connects in the background, so you can keep reading.
+- **Saved networks reconnect.** Networks you saved in KOReader reconnect after
+  sleep, even if the Kobo itself doesn't know them.
+- **No popups.** Wi-Fi messages are replaced by a small status icon.
+- **Status at a glance.** An icon in the top-left corner and in the menu bar.
+  Tap the menu-bar icon to turn Wi-Fi on or off.
+- **Tidier network list.** Dual-band routers show up once instead of twice.
 
-If you turn Wi-Fi on and no saved network is in range, the network list opens
-instead: nothing went wrong, it's your pick. If the device wakes up somewhere
-with no saved network, it turns Wi-Fi back off quietly.
+## Status icons
 
-## Menu
+| Icon | Meaning |
+|---|---|
+| Faint waves | Wi-Fi off |
+| Dot only | Wi-Fi on, not connected (menu bar only) |
+| Half the waves | Connecting |
+| Full waves | Connected |
+| Warning triangle | Something went wrong |
 
-**Menu → Network → Wi-Fi status & connect** (long-press the first two items
-for details):
+The corner icon stays up while connecting, then shows the result for a few
+seconds. If no saved network is in range when you turn Wi-Fi on, the network
+list opens so you can pick one.
 
-- **Show network list**: scans now and shows the list, e.g. to switch
-  networks. Turns Wi-Fi on first if it's off.
-- **Connect in the background**: off means KOReader's standard connect,
+## Settings
+
+Go to **Menu → Network → Wi-Fi status & connect**:
+
+- **Show network list**: scan now and pick a network. Turns Wi-Fi on if needed.
+- **Connect in the background**: turn off to use KOReader's standard connect,
   which freezes the screen.
-- **Hide Wi-Fi popups**: independent of the icons.
-- **Show Wi-Fi status in corner** / **Show Wi-Fi status in menu bar**
+- **Hide Wi-Fi popups**
+- **Show Wi-Fi status in corner**
+- **Show Wi-Fi status in menu bar**
 
-To edit or forget a saved network, use the **edit** button on its row in the
-network list. The network you're connected to shows **disconnect** instead;
-disconnect first to edit it.
+To edit or forget a saved network, tap **edit** on its row in the network
+list. If you're connected to it, tap **disconnect** first.
 
 ## Install
 
-1. Download **`wifistatus.koplugin.zip`** from the
-   [latest release](../../releases/latest) and unzip it. It contains a
-   `wifistatus.koplugin/` folder with the three files the plugin needs.
-2. Connect the Kobo over USB and copy that folder into the hidden
-   `.adds/koreader/plugins/` folder.
-3. **Upgrading from an older version** (named `wifiindicator.koplugin`, or the
-   original asxelot plugin): delete the old `wifiindicator.koplugin` folder, so
-   there aren't two copies. Your settings carry over.
-4. Eject, then restart KOReader.
+1. Download `wifistatus.koplugin.zip` from the [latest release](../../releases/latest).
+2. Unzip it and copy the `wifistatus.koplugin` folder into
+   `.adds/koreader/plugins/` on your Kobo. The `.adds` folder is hidden.
+3. Restart KOReader.
 
-On devices that don't use wpa_supplicant (anything but Kobo and similar), the
-background connect stays off; the popup hiding and the icons still work.
+**Upgrading from `wifiindicator.koplugin`** (this plugin's old name, or the
+original plugin)? Delete that folder first. Your settings are kept.
 
-### Updating with Storefront
+## Updating
 
-The [Storefront](https://github.com/ultimatejimmy/storefront.koplugin) plugin
-can check this repo's releases and update the plugin in one tap. Link the
-installed plugin to **this repository** in Storefront once. Don't accept an
-update that points at `asxelot/wifiindicator.koplugin`: that's the original
-plugin (v1.0.0), and installing it would replace this one.
+[Storefront](https://github.com/ultimatejimmy/storefront.koplugin) lists this
+plugin and can update it. Use the entry **isaiahaguilera/wifistatus.koplugin**.
+The similarly named `asxelot/wifiindicator.koplugin` is the original plugin
+and would replace this one.
 
-## How it works
+You can also download the latest release and repeat the install steps.
 
-KOReader has no hooks for any of this, so the plugin patches KOReader at load
-time (each patch applied once):
+## Compatibility
 
-- **`wificonnect.lua`**, the connect engine, replaces KOReader's Wi-Fi
-  turn-on, reconnect and after-sleep restore, plus the network list's connect.
-  Once the Wi-Fi chip is up, it hands every network saved in KOReader to
-  wpa_supplicant (in memory only; the Kobo OS's own config file is never
-  touched) and lets wpa_supplicant pick one. The slow steps (chip start-up,
-  DHCP, scans) run in background processes; the screen never waits on them.
-- **`main.lua`** filters KOReader's Wi-Fi popups, adds the menu-bar icon and
-  the menu, and turns the engine's state into icons. All icon choices live in
-  its `LOOKS` table.
-
-**Caveat:** popups are matched by KOReader's exact wording. If a KOReader
-release rewords one, that popup shows again until `INTERCEPTED_MESSAGES` in
-`main.lua` is updated.
+- Made for Kobo. Tested on a Kobo Clara BW with KOReader v2026.07.1.
+- On other devices, background connecting stays off. Hiding popups and the
+  status icons still work.
+- If you also use the koreader-nonblocking-wifi patch, the patch takes over
+  connecting. You only need one of them.
+- Popups are recognized by KOReader's exact wording. If a KOReader update
+  rewords one, that popup may show again until this plugin is updated.
 
 ## Development
 
-Three self-contained test suites, run from the repo root with LuaJIT:
+Run the tests from the repo root with [LuaJIT](https://luajit.org):
 
 ```sh
-luajit test/test_main.lua main.lua   # plugin: popup filter, icons, menu, settings
-luajit test/test_wificonnect.lua     # engine: pure network logic
-luajit test/test_engine.lua          # engine: simulated connect flows (fake KOReader + wpa_supplicant)
+luajit test/test_main.lua main.lua
+luajit test/test_wificonnect.lua
+luajit test/test_engine.lua
 ```
 
-The engine simulation checks flow and bookkeeping; real timing and hardware
-behavior need a device. `CLAUDE.md` holds the project's working notes and
-history, and `docs/plan-wpa-handoff.md` explains the engine's design.
+To release, bump `version` in `_meta.lua`, commit, then push a matching tag:
 
-### Releasing
+```sh
+git tag v2.0.1 && git push origin main v2.0.1
+```
 
-1. Bump `version` in `_meta.lua` (e.g. `2.0.1`) and commit.
-2. Tag and push: `git tag v2.0.1 && git push origin main v2.0.1`.
+GitHub Actions runs the tests and publishes the release with
+`wifistatus.koplugin.zip` attached.
 
-The **Release** workflow (`.github/workflows/release.yml`) runs the tests,
-checks the tag matches `_meta.lua`, and publishes the release with
-`wifistatus.koplugin.zip` attached. Storefront picks it up from there.
+Design notes: [docs/plan-wpa-handoff.md](docs/plan-wpa-handoff.md).
+Project history and working notes: [CLAUDE.md](CLAUDE.md).
 
-## Credits & license
+## License
 
-Started as a fork of [asxelot/wifiindicator.koplugin](https://github.com/asxelot/wifiindicator.koplugin)
-by Eugene Ryzhkov. The connect engine grew out of their
-[koreader-nonblocking-wifi](https://github.com/asxelot/koreader-nonblocking-wifi)
-user patch and keeps its background-process machinery. If that patch is
-installed too, it takes precedence and this plugin's engine stays off. You
-only need one.
-
-GPL-3.0 — see [LICENSE](LICENSE).
+GPL-3.0. See [LICENSE](LICENSE).
