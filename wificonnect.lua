@@ -122,14 +122,19 @@ local BRINGUP_TIMEOUT_S = 30
 local JOIN_TIMEOUT_S = 15 -- same as restore-wifi-async.sh
 local DHCP_TIMEOUT_S = 30
 local SCAN_TIMEOUT_S = 30
+-- Our value for NetworkMgr._nbwifi_installed, the flag Wi-Fi engines use to avoid
+-- double-patching. Must differ from the original plugin's "wifiindicator".
+local ENGINE_MARKER = "wifistatus"
 
 -- Hooks NetworkMgr. Returns whether the engine is active. Safe to call more than once
 -- (the plugin is instantiated for both FileManager and ReaderUI).
 function M.install()
     local NetworkMgr = require("ui/network/manager")
     if NetworkMgr._nbwifi_installed then
-        -- Already installed by us, or by the standalone koreader-nonblocking-wifi patch.
-        M.installed = NetworkMgr._nbwifi_installed == "wifiindicator"
+        -- Already installed: by us (our own marker), or by another engine that also sets
+        -- this flag (the koreader-nonblocking-wifi patch, or the original wifiindicator
+        -- plugin, which marks it "wifiindicator"). Then back off and leave it to them.
+        M.installed = NetworkMgr._nbwifi_installed == ENGINE_MARKER
         return M.installed
     end
     -- Kobo only: it's the only platform this was tested on. Cervantes, reMarkable and Sony
@@ -137,7 +142,7 @@ function M.install()
     if not NetworkMgr.wpa_supplicant or not require("device"):isKobo() then
         return false
     end
-    NetworkMgr._nbwifi_installed = "wifiindicator"
+    NetworkMgr._nbwifi_installed = ENGINE_MARKER
     M.installed = true
 
     local InfoMessage = require("ui/widget/infomessage")

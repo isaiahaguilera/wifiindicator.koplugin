@@ -247,7 +247,15 @@ local M_other = assert(loadfile("wificonnect.lua"))()
 local installed_elsewhere = M_other.install()
 local untouched_elsewhere = NetworkMgr.turnOnWifi == stock_turnOnWifi and NetworkMgr._nbwifi_installed == nil
 
+-- The original wifiindicator plugin's engine is already installed (it marks the flag
+-- "wifiindicator"): ours must back off, not mistake it for itself.
 is_kobo = true
+NetworkMgr._nbwifi_installed = "wifiindicator"
+local M_orig = assert(loadfile("wificonnect.lua"))()
+local installed_with_original = M_orig.install()
+local untouched_with_original = NetworkMgr.turnOnWifi == stock_turnOnWifi and not M_orig.showNetworkList
+NetworkMgr._nbwifi_installed = nil
+
 local M = assert(loadfile("wificonnect.lua"))()
 local statuses
 M.on_status = function(state) table.insert(statuses, state) end
@@ -275,7 +283,10 @@ end
 
 check(installed_elsewhere == false and not M_other.installed and untouched_elsewhere,
     "install: a non-Kobo wpa_supplicant device keeps stock connecting (nothing hooked)")
-check(installed and M.installed, "install: engine installs on a Kobo")
+check(installed_with_original == false and not M_orig.installed and untouched_with_original,
+    "install: original plugin's engine present -> ours backs off and reports not installed")
+check(installed and M.installed and NetworkMgr._nbwifi_installed == "wifistatus",
+    "install: engine installs on a Kobo, under its own marker")
 check(M.install() == true, "install: second call is a no-op that still reports installed")
 
 -- A: menu toggle, network known only to KOReader

@@ -275,7 +275,12 @@ check(#sub == 5 and sub[1].text == "Show network list" and sub[1].separator
     "settings: engine installed -> 'Show network list' on top, then 'Connect in the background'")
 sub[1].callback()
 check(list_calls == 1 and sub[1].checked_func == nil, "settings: 'Show network list' is an action, not a checkbox")
-wificonnect.installed, wificonnect.showNetworkList = false, nil
+wificonnect.showNetworkList = nil -- installed flag set, but the action isn't there
+menu_items = {}
+WifiIndicator.addToMainMenu(WifiIndicator, menu_items)
+check(#menu_items.wifi_indicator.sub_item_table == 3,
+    "settings: no engine actions unless the engine really set them up (no crash on tap)")
+wificonnect.installed = false
 
 -- ---------------------------------------------- delete plugin settings --
 local deleted = {}

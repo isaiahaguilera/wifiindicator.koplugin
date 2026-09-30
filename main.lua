@@ -281,7 +281,7 @@ end
 
 function WifiIndicator:addToMainMenu(menu_items)
     local sub_item_table = {}
-    if wificonnect.installed then
+    if wificonnect.installed and wificonnect.showNetworkList then
         table.insert(sub_item_table, {
             text = _("Show network list"),
             help_text = _("Scan for networks now and show the list, e.g. to switch networks. Turns Wi-Fi on first if it's off."),
