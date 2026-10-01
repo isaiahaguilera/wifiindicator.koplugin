@@ -289,7 +289,7 @@ function WifiIndicator:addToMainMenu(menu_items)
             separator = true,
         })
         table.insert(sub_item_table, settingItem(_("Connect in the background"), "wifiindicator_nonblocking_wifi",
-            _("Keep reading while Wi-Fi connects, and reconnect after sleep to networks saved in KOReader. When off, KOReader connects the standard way and the screen freezes while it does. Takes effect on the next connection.")))
+            _("Keep reading while Wi-Fi connects. On Kobo, it also reconnects after sleep to networks saved in KOReader. When off, KOReader connects the standard way and the screen freezes while it does. Takes effect on the next connection.")))
     end
     table.insert(sub_item_table, settingItem(_("Hide Wi-Fi popups"), "wifiindicator_suppress_popups"))
     table.insert(sub_item_table, settingItem(_("Show Wi-Fi status in corner"), "wifiindicator_show_icon"))

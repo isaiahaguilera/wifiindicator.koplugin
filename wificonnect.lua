@@ -137,9 +137,13 @@ function M.install()
         M.installed = NetworkMgr._nbwifi_installed == ENGINE_MARKER
         return M.installed
     end
-    -- Kobo only: it's the only platform this was tested on. Cervantes, reMarkable and Sony
-    -- PRS also use wpa_supplicant, but they keep stock connecting until someone tests there.
-    if not NetworkMgr.wpa_supplicant or not require("device"):isKobo() then
+    -- Kobo, or a Kindle with KOReader's lipc bindings (without them, stock Kindle connecting
+    -- never scans, so there's nothing to fix). Cervantes, reMarkable and Sony PRS also use
+    -- wpa_supplicant, but they keep stock connecting until someone tests there.
+    local Device = require("device")
+    local is_kobo = NetworkMgr.wpa_supplicant and Device:isKobo()
+    local is_kindle = Device:isKindle() and (pcall(require, "liblipclua"))
+    if not is_kobo and not is_kindle then
         return false
     end
     NetworkMgr._nbwifi_installed = ENGINE_MARKER
@@ -147,9 +151,7 @@ function M.install()
 
     local InfoMessage = require("ui/widget/infomessage")
     local UIManager = require("ui/uimanager")
-    local WpaClient = require("lj-wpaclient/wpaclient")
     local buffer = require("string.buffer")
-    local crypto = require("ffi/crypto")
     local ffi = require("ffi")
     local ffiutil = require("ffi/util")
     local logger = require("logger")
@@ -302,6 +304,93 @@ function M.install()
         end
         tick()
     end
+
+    -- Kobo only: patches the network list's per-network connect (set further down).
+    local patchList
+
+    -- Scan in a subprocess (the screen never waits), rescanning once on an empty first
+    -- result like stock does (#4387). on_done(ok, list, err).
+    local function scanNetworks(on_done)
+        local function scan(on_scan)
+            subprocessCall(function() return NetworkMgr:getNetworkList() end, SCAN_TIMEOUT_S, on_scan)
+        end
+        scan(function(ok, list, err)
+            if ok and list and #list == 0 then
+                return scan(on_done)
+            end
+            on_done(ok, list, err)
+        end)
+    end
+
+    -- Show the stock network list, each network once.
+    local function showList(list, connect_callback)
+        local NetworkSetting = require("ui/widget/networksetting")
+        if patchList then patchList(NetworkSetting) end
+        local list_widget = NetworkSetting:new{ network_list = M.mergeBySSID(list) }
+        -- Set after construction: NetworkSetting:init() treats a connect_callback plus an
+        -- already-connected network as "the reconnect missed it", re-runs DHCP on the UI
+        -- thread ("Obtaining IP address…") and closes the list. Taps still use it.
+        list_widget.connect_callback = connect_callback
+        UIManager:show(list_widget)
+    end
+
+    -- Scan, then show the list.
+    -- keep_wifi: a failed scan only reports a problem, it doesn't tear Wi-Fi down.
+    -- on_scanned: called once the scan is over, whatever the outcome.
+    local function scanThenShowList(connect_callback, keep_wifi, on_scanned)
+        scanNetworks(function(ok, list)
+            if on_scanned then on_scanned() end
+            if not ok or not list then
+                report("problem")
+                if keep_wifi then return end
+                return NetworkMgr:_abortWifiConnection()
+            end
+            showList(list, connect_callback)
+        end)
+    end
+
+    -- Menu action: a fresh scan, then the network list (e.g. to switch networks).
+    -- With Wi-Fi off, turn it on like a long-press on "Wi-Fi connection" does: connect,
+    -- then show the list.
+    function M.showNetworkList()
+        if not NetworkMgr:isWifiOn() then
+            return NetworkMgr:toggleWifiOn(nil, true, true)
+        end
+        -- The user asked for the list: a short "looking" note is feedback, not noise.
+        -- (Its own wording, so main.lua's popup filter leaves it alone.)
+        -- The timeout is a safety net: a cancelled scan (Wi-Fi turned off) never reports back.
+        local info = InfoMessage:new{ text = _("Looking for networks…"), timeout = 2 * SCAN_TIMEOUT_S }
+        UIManager:show(info)
+        scanThenShowList(function()
+            -- A network was joined from the list: let KOReader confirm it and broadcast
+            -- NetworkConnected, like enableWifi does.
+            if NetworkMgr.pending_connectivity_check then
+                NetworkMgr:unscheduleConnectivityCheck()
+            end
+            NetworkMgr:scheduleConnectivityCheck()
+        end, true, function() UIManager:close(info) end)
+    end
+
+    if is_kindle then
+        -- Kindle: only the scan needs moving off the UI thread (see wificonnect_kindle.lua).
+        -- Plugin-local modules can only be required while KOReader loads the plugin, which is
+        -- when install() runs.
+        require("wificonnect_kindle")({
+            NetworkMgr = NetworkMgr,
+            enabled = enabled,
+            report = report,
+            start = start,
+            pollUntil = pollUntil,
+            scanNetworks = scanNetworks,
+            showList = showList,
+        })
+        logger.info("WifiIndicator: non-blocking Wi-Fi connect engine installed (Kindle)")
+        return true
+    end
+
+    -- Kobo from here on: hand KOReader's saved networks to wpa_supplicant.
+    local WpaClient = require("lj-wpaclient/wpaclient")
+    local crypto = require("ffi/crypto")
 
     -- Run fn(wcli) against wpa_supplicant's control socket (fast, local).
     local function withWpa(fn)
@@ -464,37 +553,7 @@ function M.install()
             end)
         end
     end
-
-    -- Scan in a subprocess, then show the stock network list.
-    -- keep_wifi: a failed scan only reports a problem, it doesn't tear Wi-Fi down.
-    -- on_scanned: called once the scan is over, whatever the outcome.
-    local function scanThenShowList(connect_callback, keep_wifi, on_scanned)
-        local function show(ok, list)
-            if on_scanned then on_scanned() end
-            if not ok or not list then
-                report("problem")
-                if keep_wifi then return end
-                return NetworkMgr:_abortWifiConnection()
-            end
-            local NetworkSetting = require("ui/widget/networksetting")
-            patchNetworkList(NetworkSetting)
-            local list_widget = NetworkSetting:new{ network_list = M.mergeBySSID(list) }
-            -- Set after construction: NetworkSetting:init() treats a connect_callback plus an
-            -- already-connected network as "the reconnect missed it", re-runs DHCP on the UI
-            -- thread ("Obtaining IP address…") and closes the list. Taps still use it.
-            list_widget.connect_callback = connect_callback
-            UIManager:show(list_widget)
-        end
-        local function scan(on_scan)
-            subprocessCall(function() return NetworkMgr:getNetworkList() end, SCAN_TIMEOUT_S, on_scan)
-        end
-        scan(function(ok, list)
-            if ok and list and #list == 0 then -- stock rescans once on an empty first scan (#4387)
-                return scan(show)
-            end
-            show(ok, list)
-        end)
-    end
+    patchList = patchNetworkList
 
     -- Everything after bring-up: hand off, wait for a join, DHCP, then finish like stock.
     -- quiet: a background restore (wake/startup) that finds nothing to join isn't a problem,
@@ -560,28 +619,6 @@ function M.install()
         end
         start()
         bringUp(function() connect(nil, false, true) end)
-    end
-
-    -- Menu action: a fresh scan, then the network list (e.g. to switch networks).
-    -- With Wi-Fi off, turn it on like a long-press on "Wi-Fi connection" does: connect,
-    -- then show the list.
-    function M.showNetworkList()
-        if not NetworkMgr:isWifiOn() then
-            return NetworkMgr:toggleWifiOn(nil, true, true)
-        end
-        -- The user asked for the list: a short "looking" note is feedback, not noise.
-        -- (Its own wording, so main.lua's popup filter leaves it alone.)
-        -- The timeout is a safety net: a cancelled scan (Wi-Fi turned off) never reports back.
-        local info = InfoMessage:new{ text = _("Looking for networks…"), timeout = 2 * SCAN_TIMEOUT_S }
-        UIManager:show(info)
-        scanThenShowList(function()
-            -- A network was joined from the list: let KOReader confirm it and broadcast
-            -- NetworkConnected, like enableWifi does.
-            if NetworkMgr.pending_connectivity_check then
-                NetworkMgr:unscheduleConnectivityCheck()
-            end
-            NetworkMgr:scheduleConnectivityCheck()
-        end, true, function() UIManager:close(info) end)
     end
 
     logger.info("WifiIndicator: non-blocking Wi-Fi connect engine installed")

@@ -50,6 +50,8 @@ package.preload["ffi/blitbuffer"] = function() return { COLOR_WHITE = 0 } end
 package.preload["device"] = function()
     return {
         screen = { scaleBySize = function(_, n) return n end },
+        isKobo = function() return false end,
+        isKindle = function() return false end,
     }
 end
 package.preload["ui/widget/container/framecontainer"] = function()

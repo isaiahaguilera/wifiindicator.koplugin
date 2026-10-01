@@ -38,7 +38,7 @@ jobs:
       - name: Build wifistatus.koplugin.zip
         run: |
           mkdir -p dist/wifistatus.koplugin
-          cp main.lua wificonnect.lua _meta.lua dist/wifistatus.koplugin/
+          cp main.lua wificonnect.lua wificonnect_kindle.lua _meta.lua dist/wifistatus.koplugin/
           cd dist && zip -r wifistatus.koplugin.zip wifistatus.koplugin
 
       - name: Publish the release

@@ -237,7 +237,10 @@ package.preload["ui/time"] = function()
 end
 package.preload["gettext"] = function() return function(s) return s end end
 local is_kobo = false
-package.preload["device"] = function() return { isKobo = function() return is_kobo end } end
+local is_kindle = false
+package.preload["device"] = function()
+    return { isKobo = function() return is_kobo end, isKindle = function() return is_kindle end }
+end
 package.preload["ui/widget/networksetting"] = function() return NetworkSetting end
 
 -- ------------------------------------------------------------------ harness --
@@ -464,6 +467,167 @@ wifi_on = false
 M.showNetworkList()
 check(has(calls, "toggleWifiOn true true") and #UIManager.shown == 0,
     "L: Wi-Fi off -> turns it on like a long-press (connect, then the list)")
+
+-- ========================================================================= Kindle --
+-- A Kindle with KOReader's lipc bindings: wifid connects by itself; only the scan blocks.
+check(package.loaded["wificonnect_kindle"] == nil, "kindle: the Kindle module isn't loaded on a Kobo")
+
+local kcalls, kstatuses
+local kwifi -- { connected = bool, connect_at = virtual time wifid finishes joining }
+local kscan -- { list = scan result, seq = optional list of results for successive scans }
+local KNetworkMgr = {}
+function KNetworkMgr:turnOnWifi(cb, interactive) -- the stock Kindle one: fast enable, then reconnect
+    table.insert(kcalls, "enable")
+    return self:reconnectOrShowNetworkMenu(cb, interactive)
+end
+function KNetworkMgr:reconnectOrShowNetworkMenu() table.insert(kcalls, "stock reconnect") end
+function KNetworkMgr:getNetworkList() -- runs in the (fake) subprocess
+    if kscan.seq and #kscan.seq > 0 then return table.remove(kscan.seq, 1) end
+    return kscan.list
+end
+function KNetworkMgr:authenticateNetwork(nw)
+    table.insert(kcalls, "auth " .. tostring(nw.ssid))
+    kwifi.connect_at = now + (kscan.join_after or 3)
+    return true
+end
+function KNetworkMgr:isConnected()
+    return kwifi.connected or (kwifi.connect_at ~= nil and now >= kwifi.connect_at)
+end
+function KNetworkMgr:isWifiOn() return true end
+function KNetworkMgr:disableWifi() table.insert(kcalls, "disableWifi") end
+function KNetworkMgr:_abortWifiConnection() table.insert(kcalls, "abort") end
+function KNetworkMgr:toggleWifiOn() table.insert(kcalls, "toggleWifiOn") end
+function KNetworkMgr:scheduleConnectivityCheck() table.insert(kcalls, "connectivity check") end
+function KNetworkMgr:unscheduleConnectivityCheck() end
+local stock_kindle_turnOnWifi = KNetworkMgr.turnOnWifi
+
+-- Its own network-list fake, so we can see the Kobo-only item patch isn't applied here.
+local KNetworkItem = {}
+KNetworkItem.__index = KNetworkItem
+function KNetworkItem:connect() table.insert(kcalls, "stock item connect") end
+local KNetworkSetting = {}
+function KNetworkSetting.init(self)
+    self.items = {}
+    for _, nw in ipairs(self.network_list) do
+        table.insert(self.items, setmetatable({ info = nw, setting_ui = self }, KNetworkItem))
+    end
+end
+function KNetworkSetting:new(o)
+    o = setmetatable(o, { __index = self })
+    o:init()
+    return o
+end
+
+package.loaded["ui/network/manager"] = KNetworkMgr
+package.loaded["ui/widget/networksetting"] = KNetworkSetting
+package.preload["liblipclua"] = function() return {} end
+is_kobo, is_kindle = false, true
+local K = assert(loadfile("wificonnect.lua"))()
+K.on_status = function(state) table.insert(kstatuses, state) end
+local k_installed = K.install()
+check(k_installed and K.installed and KNetworkMgr._nbwifi_installed == "wifistatus"
+    and package.loaded["wificonnect_kindle"] ~= nil,
+    "kindle: engine installs on a Kindle with lipc, loading the Kindle module")
+check(KNetworkMgr.turnOnWifi == stock_kindle_turnOnWifi,
+    "kindle: stock turnOnWifi kept (enabling Wi-Fi is already fast); only the reconnect is replaced")
+
+local function kscenario(opts)
+    now, queue, spawn_count = 0, {}, 0
+    kcalls, kstatuses = {}, {}
+    UIManager.shown, UIManager.closed = {}, {}
+    settings = {}
+    kwifi = { connected = opts.connected or false }
+    kscan = { list = opts.list or {}, seq = opts.seq, join_after = opts.join_after }
+    KNetworkMgr.lease_ssid = nil
+    KNetworkMgr.wifi_toggle_long_press = opts.long_press
+end
+
+-- K1: a saved network in range (a stronger unsaved one too)
+kscenario{ list = { { ssid = "Home", signal_quality = 56, password = "x" }, { ssid = "Cafe", signal_quality = 81 } } }
+local kcb = 0
+local kret = KNetworkMgr:turnOnWifi(function() kcb = kcb + 1 end, true)
+check(kret == nil and kstatuses[1] == "connecting" and #kstatuses == 1 and not has(kcalls, "stock reconnect"),
+    "kindle K1: returns at once (no blocking scan), reports connecting")
+run()
+check(has(kcalls, "auth Home") and not has(kcalls, "auth Cafe"), "kindle K1: asks wifid for the saved network, not the unsaved one")
+check(kcb == 1 and kstatuses[#kstatuses] == "connected" and KNetworkMgr.lease_ssid == "Home",
+    "kindle K1: connected once wifid has an address; callback once; lease_ssid set")
+check(spawn_count == 1 and #UIManager.shown == 0, "kindle K1: one background scan, no popups")
+
+-- K2: wifid already on a known network
+kscenario{ connected = true, list = { { ssid = "Home", signal_quality = 81, password = "x", connected = true } } }
+KNetworkMgr:turnOnWifi(nil, true)
+run()
+check(not has(kcalls, "auth Home") and kstatuses[#kstatuses] == "connected" and now < 1,
+    "kindle K2: already connected -> no extra connect request, done right away")
+
+-- K3: no saved network in range, user asked -> the list, not a problem
+kscenario{ list = { { ssid = "Neighbor", signal_quality = 40 } } }
+KNetworkMgr:turnOnWifi(nil, true)
+run()
+local klist = UIManager.shown[1]
+check(kstatuses[#kstatuses] == "choose" and klist and klist.network_list[1].ssid == "Neighbor"
+    and not has(kcalls, "abort"), "kindle K3: nothing saved in range -> 'choose' and the list, Wi-Fi stays on")
+klist.items[1]:connect()
+check(has(kcalls, "stock item connect"), "kindle K3: list taps use KOReader's own Kindle connect (no Kobo patch)")
+
+-- K4: no saved network in range, an action needed the network -> problem, Wi-Fi off
+kscenario{ list = { { ssid = "Neighbor", signal_quality = 40 } } }
+KNetworkMgr:turnOnWifi(nil, false)
+run()
+check(kstatuses[#kstatuses] == "problem" and has(kcalls, "abort") and #UIManager.shown == 0,
+    "kindle K4: non-interactive, nothing saved in range -> problem, aborted, no list")
+
+-- K5: saved network found, but wifid never gets an address
+kscenario{ list = { { ssid = "Home", signal_quality = 56, password = "x" } }, join_after = 1000 }
+kcb = 0
+KNetworkMgr:turnOnWifi(function() kcb = kcb + 1 end, true)
+run()
+check(kstatuses[#kstatuses] == "problem" and kcb == 0 and now >= 45 and now <= 46 and UIManager.shown[1],
+    "kindle K5: no address within 45 s -> problem, no callback, the list for the user")
+
+-- K6: the scan fails
+kscenario{ list = {} }
+fail_spawn_at = 1
+KNetworkMgr:turnOnWifi(nil, true)
+run()
+fail_spawn_at = nil
+check(kstatuses[#kstatuses] == "problem" and has(kcalls, "abort"), "kindle K6: scan failure -> problem, aborted")
+
+-- K7: empty first scan -> one rescan, like stock
+kscenario{ seq = { {}, { { ssid = "Home", signal_quality = 56, password = "x" } } } }
+KNetworkMgr:turnOnWifi(nil, true)
+run()
+check(spawn_count == 2 and kstatuses[#kstatuses] == "connected", "kindle K7: empty first scan -> rescans once, connects")
+
+-- K8: long press -> connect, then the list from the same scan
+kscenario{ list = { { ssid = "Home", signal_quality = 56, password = "x" } }, long_press = true }
+KNetworkMgr:turnOnWifi(nil, true)
+run()
+check(kstatuses[#kstatuses] == "connected" and UIManager.shown[1] and spawn_count == 1
+    and KNetworkMgr.wifi_toggle_long_press == nil, "kindle K8: long press -> connected, then the list (no second scan)")
+
+-- K9: Wi-Fi turned off mid-scan
+kscenario{ list = { { ssid = "Home", signal_quality = 56, password = "x" } } }
+kcb = 0
+KNetworkMgr:turnOnWifi(function() kcb = kcb + 1 end, true)
+KNetworkMgr:disableWifi()
+run()
+check(kcb == 0 and not has(kcalls, "auth Home") and #kstatuses == 1 and K.state == "idle",
+    "kindle K9: disableWifi mid-scan cancels: no connect request, no callback, state idle")
+
+-- K10: off switch -> stock Kindle connecting
+kscenario{ list = { { ssid = "Home", signal_quality = 56, password = "x" } } }
+settings.wifiindicator_nonblocking_wifi = false
+KNetworkMgr:turnOnWifi(nil, true)
+check(has(kcalls, "stock reconnect") and #kstatuses == 0, "kindle K10: setting off -> stock reconnect")
+
+-- K11: "Show network list" works on Kindle too
+kscenario{ list = { { ssid = "Home", signal_quality = 56, password = "x" } } }
+K.showNetworkList()
+run()
+check(UIManager.shown[1] and UIManager.shown[1].text == "Looking for networks…" and UIManager.shown[2]
+    and UIManager.shown[2].network_list, "kindle K11: 'Show network list' scans in the background and shows the list")
 
 print(failures == 0 and "ALL TESTS PASSED" or (failures .. " TEST(S) FAILED"))
 os.exit(failures == 0 and 0 or 1)
